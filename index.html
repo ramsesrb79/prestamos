@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -67,6 +67,9 @@
   }
 
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+  button, a, input, select, label, .row, .tab { touch-action: manipulation; }
+  .pad, .tabbar, .nav-i, .btn, .chk { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   body { background: var(--bg); color: var(--label); font: 17px/1.35 var(--font); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
   h1, h2, h3, p, dl, dd { margin: 0; }
   h1, h2, h3 { text-wrap: balance; }
@@ -269,7 +272,7 @@
   td.sal { font-weight: 600; }
   tfoot td { position: sticky; bottom: 0; background: var(--card); border-top: .5px solid var(--sep); padding: 10px 12px; font-weight: 600; text-align: right; white-space: nowrap; }
   tfoot td:first-child { text-align: left; }
-  input.abono { width: 118px; text-align: right; font: 500 15px var(--font); padding: 6px 8px; border: 0; border-radius: 8px; background: var(--fill); color: var(--label); }
+  input.abono { width: 118px; text-align: right; font: 500 16px var(--font); padding: 6px 8px; border: 0; border-radius: 8px; background: var(--fill); color: var(--label); }
   input.abono.tiene { background: rgba(52, 199, 89, .18); color: var(--pos); font-weight: 600; }
   input.abono:disabled { opacity: .4; }
   .tlegend { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--label-2); }
@@ -1762,6 +1765,12 @@
     guardar(); actualizarDetalle();
   });
   window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VISTAS[v] && v !== vista) { vista = v; prestAbierto = null; render(); } });
+
+  // Sin zoom: evita el pellizco y el doble toque en iPhone/iPad
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+  let ultimoToque = 0;
+  document.addEventListener('touchend', (e) => { const ahora = Date.now(); if (ahora - ultimoToque < 350 && !e.target.closest('input, select, textarea')) e.preventDefault(); ultimoToque = ahora; }, { passive: false });
+  document.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
   // ================= Inicio =================
   const h = location.hash.slice(1);
