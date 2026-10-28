@@ -172,7 +172,7 @@
   .kv { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: .5px solid var(--sep); }
   .kv div { display: flex; justify-content: space-between; gap: 12px; }
   .kv dt { color: var(--label-2); }
-  .kv dd { font-variant-numeric: tabular-nums; font-weight: 500; text-align: right; }
+  .kv dd { font-variant-numeric: tabular-nums; font-weight: 500; text-align: right; white-space: nowrap; }
 
   .bar { height: 8px; border-radius: 99px; background: var(--fill); overflow: hidden; }
   .bar.lg { height: 12px; }
@@ -532,7 +532,7 @@
   let S;
   function normalizarEstado(s) {
     s = s && typeof s === 'object' ? s : {};
-    const out = { version: 1, cuentas: [], movimientos: [], categorias: [], metas: [], prestamos: [], config: { ingresoMensual: 0, ahorroMensual: 0 } };
+    const out = { version: 1, cuentas: [], movimientos: [], categorias: [], metas: [], prestamos: [], recurrentes: [], config: { ingresoMensual: 0, ahorroMensual: 0 } };
     out.cuentas = (Array.isArray(s.cuentas) ? s.cuentas : []).filter((c) => c && c.id).map((c) => ({
       id: String(c.id), nombre: String(c.nombre || 'Cuenta'), tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'cheques',
       saldoInicial: num(c.saldoInicial), limite: Math.max(0, num(c.limite)), creado: c.creado || new Date().toISOString()
@@ -547,10 +547,15 @@
     if (!out.categorias.some((c) => c.id === CAT_PREST)) out.categorias.push(categoriasBase().find((c) => c.id === CAT_PREST));
     out.movimientos = (Array.isArray(s.movimientos) ? s.movimientos : []).filter((m) => m && m.id && ids.has(m.cuentaId)).map((m) => {
       const tipo = ['gasto', 'ingreso', 'transferencia'].includes(m.tipo) ? m.tipo : 'gasto';
-      return { id: String(m.id), tipo, monto: Math.abs(num(m.monto)), cuentaId: m.cuentaId, cuentaDestinoId: tipo === 'transferencia' && ids.has(m.cuentaDestinoId) ? m.cuentaDestinoId : null, categoriaId: tipo === 'transferencia' ? null : (m.categoriaId || null), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : hoyISO(), nota: String(m.nota || ''), posteado: !!m.posteado, creado: m.creado || new Date().toISOString() };
+      return { id: String(m.id), tipo, monto: Math.abs(num(m.monto)), cuentaId: m.cuentaId, cuentaDestinoId: tipo === 'transferencia' && ids.has(m.cuentaDestinoId) ? m.cuentaDestinoId : null, categoriaId: tipo === 'transferencia' ? null : (m.categoriaId || null), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : hoyISO(), nota: String(m.nota || ''), posteado: !!m.posteado, recurrenteId: m.recurrenteId ? String(m.recurrenteId) : null, creado: m.creado || new Date().toISOString() };
     }).filter((m) => m.tipo !== 'transferencia' || m.cuentaDestinoId);
     out.metas = (Array.isArray(s.metas) ? s.metas : []).filter((m) => m && m.id).map((m) => ({ id: String(m.id), nombre: String(m.nombre || 'Meta'), objetivo: Math.max(0, num(m.objetivo)), ahorrado: Math.max(0, num(m.ahorrado)), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : '', color: PALETA.includes(m.color) ? m.color : 'green' }));
     out.prestamos = (Array.isArray(s.prestamos) ? s.prestamos : []).map(normalizarPrestamo);
+    const fISO = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : '');
+    out.recurrentes = (Array.isArray(s.recurrentes) ? s.recurrentes : []).filter((r) => r && r.id && ids.has(r.cuentaId) && FRECS[r.frecuencia] && fISO(r.inicio)).map((r) => {
+      const tipo = ['gasto', 'ingreso', 'transferencia'].includes(r.tipo) ? r.tipo : 'gasto';
+      return { id: String(r.id), tipo, monto: Math.abs(num(r.monto)), cuentaId: r.cuentaId, cuentaDestinoId: tipo === 'transferencia' && ids.has(r.cuentaDestinoId) ? r.cuentaDestinoId : null, categoriaId: tipo === 'transferencia' ? null : (r.categoriaId || null), nota: String(r.nota || ''), frecuencia: r.frecuencia, inicio: r.inicio, fin: fISO(r.fin), hasta: fISO(r.hasta), modo: r.modo === 'confirmar' ? 'confirmar' : 'auto' };
+    }).filter((r) => r.tipo !== 'transferencia' || r.cuentaDestinoId);
     out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)), claveCopia: s.config && typeof s.config.claveCopia === 'string' ? s.config.claveCopia : '', recordatorioDias: [0, 1, 7, 14, 30].includes(s.config && s.config.recordatorioDias) ? s.config.recordatorioDias : 7 };
     return out;
   }
@@ -775,6 +780,7 @@
     S = normalizarEstado(datos); cacheAm.clear();
     lsSet('bloqueo_fallos', 0); lsDel('bloqueo_hasta');
     $('#lock').hidden = true; $('#lk-box').innerHTML = ''; padActivo = null;
+    procesarRecurrentes();
     render();
     snapDiario();
   }
@@ -797,7 +803,8 @@
   let ocultoDesde = 0;
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { ocultoDesde = Date.now(); return; }
-    if (lockCfg() && !sesion.bloqueada && ocultoDesde && Date.now() - ocultoDesde > 60000) bloquearAhora();
+    if (lockCfg() && !sesion.bloqueada && ocultoDesde && Date.now() - ocultoDesde > 60000) { bloquearAhora(); return; }
+    if (!sesion.bloqueada && S && procesarRecurrentes()) render();
   });
   const cuenta = (id) => S.cuentas.find((c) => c.id === id);
   const cat = (id) => S.categorias.find((c) => c.id === id);
@@ -843,6 +850,59 @@
   }
   const ingresoPlan = (ym) => (S.config.ingresoMensual > 0 ? { v: S.config.ingresoMensual, fuente: 'manual', n: 0 } : ingresoEstimado(ym));
   const etiquetaIngreso = (ip) => (ip.fuente === 'manual' ? 'Ingreso del mes' : ip.fuente === 'promedio' ? `Ingreso estimado (promedio de ${ip.n} ${ip.n === 1 ? 'mes' : 'meses'})` : 'Ingresos recibidos este mes');
+  // ================= Movimientos programados =================
+  const FRECS = { semanal: ['Cada semana', 'd', 7], quincenal: ['Cada 2 semanas', 'd', 14], mensual: ['Cada mes', 'm', 1], bimestral: ['Cada 2 meses', 'm', 2], trimestral: ['Cada 3 meses', 'm', 3], semestral: ['Cada 6 meses', 'm', 6], anual: ['Cada año', 'm', 12] };
+  function ocurrencia(r, n) {
+    const [y, mo, d] = r.inicio.split('-').map(Number);
+    const [, u, k] = FRECS[r.frecuencia];
+    if (u === 'd') return isoDe(new Date(y, mo - 1, d + n * k));
+    const base = new Date(y, mo - 1 + n * k, 1), dim = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+    return isoDe(new Date(base.getFullYear(), base.getMonth(), Math.min(d, dim)));
+  }
+  // Fechas pendientes (después de la última atendida) hasta una fecha límite
+  function proximas(r, limite, max = 50) {
+    const out = [];
+    for (let n = 0; n < 6000 && out.length < max; n++) {
+      const f = ocurrencia(r, n);
+      if ((r.fin && f > r.fin) || f > limite) break;
+      if (r.hasta && f <= r.hasta) continue;
+      out.push(f);
+    }
+    return out;
+  }
+  const siguiente = (r) => proximas(r, '9999-12-31', 1)[0] || null;
+  const movDeRec = (r, f) => ({ id: nuevoId('m'), tipo: r.tipo, monto: r.monto, cuentaId: r.cuentaId, cuentaDestinoId: r.tipo === 'transferencia' ? r.cuentaDestinoId : null, categoriaId: r.tipo === 'transferencia' ? null : r.categoriaId, fecha: f, nota: r.nota, posteado: false, recurrenteId: r.id, creado: new Date().toISOString() });
+  function procesarRecurrentes() {
+    if (!S || sesion.bloqueada) return 0;
+    const hoy = hoyISO(); let n = 0;
+    S.recurrentes.forEach((r) => { if (r.modo !== 'auto') return; proximas(r, hoy, 400).forEach((f) => { S.movimientos.push(movDeRec(r, f)); r.hasta = f; n++; }); });
+    if (n) { guardar(); toast(n === 1 ? 'Se registró 1 movimiento programado' : `Se registraron ${n} movimientos programados`); }
+    return n;
+  }
+  function porConfirmar() { const hoy = hoyISO(), out = []; S.recurrentes.forEach((r) => { if (r.modo === 'auto') return; const f = proximas(r, hoy, 1)[0]; if (f) out.push({ r, f }); }); return out.sort((a, b) => a.f.localeCompare(b.f)); }
+  function agenda(dias) { const hoy = hoyISO(), lim = isoDe(new Date(Date.now() + dias * 864e5)), out = []; S.recurrentes.forEach((r) => { const f = proximas(r, lim, 3).find((x) => x > hoy); if (f) out.push({ r, f }); }); return out.sort((a, b) => a.f.localeCompare(b.f)); }
+  function pendientesMes(ym) {
+    if (ym !== ymHoy()) return 0;
+    const fin = ym + '-' + pad(diasDelMes(ym)); let t = 0;
+    S.recurrentes.forEach((r) => { if (r.tipo === 'gasto' && r.categoriaId !== CAT_PREST) t += r.monto * proximas(r, fin, 40).length; });
+    return t;
+  }
+  const fCorta = (f) => parseISO(f).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }).replace('.', '');
+  function cuandoTxt(f) { const d = Math.round((parseISO(f) - parseISO(hoyISO())) / 864e5); return d === 0 ? 'Hoy' : d === 1 ? 'Mañana' : d < 0 ? `Tocaba el ${fCorta(f)}` : `${fCorta(f)} · en ${d} días`; }
+  function partesRec(r) {
+    const c = cat(r.categoriaId), cu = cuenta(r.cuentaId), de = cuenta(r.cuentaDestinoId);
+    return {
+      ic: r.tipo === 'transferencia' ? `<span class="ic" style="--c:var(--c-gray)">${IC.flechas}</span>` : icCat(c),
+      titulo: r.nota || (r.tipo === 'transferencia' ? 'Transferencia' : c ? c.nombre : 'Movimiento'),
+      cuentas: r.tipo === 'transferencia' ? `${cu ? cu.nombre : ''} → ${de ? de.nombre : ''}` : (cu ? cu.nombre : ''),
+      amt: `<span class="amt ${r.tipo === 'ingreso' ? 'pos' : r.tipo === 'transferencia' ? 'muted' : ''}">${r.tipo === 'ingreso' ? '+' : r.tipo === 'gasto' ? '−' : ''}${moneyAbs(r.monto)}</span>`
+    };
+  }
+  function filaRec(r, f, confirmar) {
+    const x = partesRec(r), sub = `${cuandoTxt(f)} · ${x.cuentas}`;
+    if (confirmar) return `<div class="row" style="flex-wrap:wrap; cursor:default; row-gap:8px">${x.ic}<span class="rt"><span class="t1">${esc(x.titulo)}</span><span class="t2">${esc(sub)}</span></span>${x.amt}<div style="display:flex; gap:10px; width:100%; padding:0 0 4px 46px"><button class="btn small" type="button" data-act="rec-confirmar" data-id="${r.id}" data-f="${f}">Registrar</button><button class="btn small tinted" type="button" data-act="rec-saltar" data-id="${r.id}" data-f="${f}">Saltar esta vez</button></div></div>`;
+    return `<button class="row" type="button" data-act="editar-rec" data-id="${r.id}">${x.ic}<span class="rt"><span class="t1">${esc(x.titulo)}</span><span class="t2">${esc(sub)}</span></span>${x.amt}</button>`;
+  }
   function disponible(ym) {
     const st = statsMes(ym);
     const ip = ingresoPlan(ym);
@@ -851,8 +911,9 @@
     const cuotas = cuotasMes(ym);
     const pend = Math.max(0, cuotas - (st.porCat[CAT_PREST] || 0));
     const sobre = ingresoBase - ah;
-    const usado = st.gas + pend;
-    return { st, ip, ingresoBase, ah, cuotas, pend, sobre, usado, libre: sobre - usado };
+    const prog = pendientesMes(ym);
+    const usado = st.gas + pend + prog;
+    return { st, ip, ingresoBase, ah, cuotas, pend, prog, sobre, usado, libre: sobre - usado };
   }
   function patrimonio(sal) {
     let efectivo = 0, inv = 0, tarj = 0;
@@ -957,9 +1018,13 @@
       const color = d.libre < 0 ? 'red' : ratio > 0.85 ? 'orange' : 'green';
       const sub = d.libre > 0.005 ? `Unos ${money(d.libre / diasRest)} por día · quedan ${diasRest} ${diasRest === 1 ? 'día' : 'días'} del mes` : d.libre < -0.005 ? 'Ya gastaste más de lo que planeaste este mes' : 'Ya usaste todo lo disponible de este mes';
       html += `<section class="hero"><p class="k">Puedes gastar este mes</p><p class="big ${d.libre < -0.005 ? 'neg' : ''}">${money(d.libre)}</p><p class="sub">${sub}</p><div class="bar lg" style="--c:var(--c-${color})"><i style="width:${(ratio * 100).toFixed(1)}%"></i></div>
-        <dl class="kv"><div><dt>${etiquetaIngreso(d.st.ing >= d.ip.v && d.ip.fuente !== 'manual' ? { fuente: 'real' } : d.ip)}</dt><dd>${money(d.ingresoBase)}</dd></div><div><dt>Separado para ahorro</dt><dd>${menos(d.ah)}</dd></div><div><dt>Ya gastaste</dt><dd>${menos(d.st.gas)}</dd></div>${d.pend > 0.005 ? `<div><dt>Préstamos por pagar</dt><dd>${menos(d.pend)}</dd></div>` : ''}</dl></section>`;
+        <dl class="kv"><div><dt>${etiquetaIngreso(d.st.ing >= d.ip.v && d.ip.fuente !== 'manual' ? { fuente: 'real' } : d.ip)}</dt><dd>${money(d.ingresoBase)}</dd></div><div><dt>Separado para ahorro</dt><dd>${menos(d.ah)}</dd></div><div><dt>Ya gastaste</dt><dd>${menos(d.st.gas)}</dd></div>${d.pend > 0.005 ? `<div><dt>Préstamos por pagar</dt><dd>${menos(d.pend)}</dd></div>` : ''}${d.prog > 0.005 ? `<div><dt>Programados por venir</dt><dd>${menos(d.prog)}</dd></div>` : ''}</dl></section>`;
     }
 
+    const pc = porConfirmar();
+    if (pc.length) html += `<section class="section"><div class="sh"><h2>Por confirmar</h2></div><div class="group">${pc.slice(0, 6).map(({ r, f }) => filaRec(r, f, true)).join('')}</div></section>`;
+    const ag = agenda(30);
+    if (ag.length) html += `<section class="section"><div class="sh"><h2>Próximos 30 días</h2><button class="link sm" type="button" data-act="programados">Programados</button></div><div class="group">${ag.slice(0, 5).map(({ r, f }) => filaRec(r, f, false)).join('')}</div></section>`;
     const ahorroMes = d.st.ing - d.st.gas;
     html += `<section class="section"><div class="sh"><h2>Este mes</h2><button class="link sm" type="button" data-act="tab" data-v="movimientos">Ver todo</button></div><div class="stats">
       <div class="stat"><p class="k">Ingresos</p><p class="v pos">${money(d.st.ing)}</p></div>
@@ -991,7 +1056,7 @@
   function vMovimientos() {
     const opsC = S.cuentas.map((c) => `<option value="${c.id}" ${filtro.cuenta === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     const opsK = S.categorias.map((c) => `<option value="${c.id}" ${filtro.cat === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
-    return encabezado('Movimientos', '', btnMas('nuevo-mov', 'Nuevo movimiento')) + mnav('mes-mov', mesMov) +
+    return encabezado('Movimientos', '', `<button class="btn small tinted" type="button" data-act="programados">Programados${S.recurrentes.length ? ' · ' + S.recurrentes.length : ''}</button>${btnMas('nuevo-mov', 'Nuevo movimiento')}`) + mnav('mes-mov', mesMov) +
       `<div class="filters"><select id="f-cuenta" aria-label="Filtrar por cuenta"><option value="">Todas las cuentas</option>${opsC}</select><select id="f-cat" aria-label="Filtrar por categoría"><option value="">Todas las categorías</option>${opsK}</select><select id="f-estado" aria-label="Filtrar por estado en el banco"><option value="">Posteados y pendientes</option><option value="pend" ${filtro.estado === 'pend' ? 'selected' : ''}>Solo pendientes</option><option value="post" ${filtro.estado === 'post' ? 'selected' : ''}>Solo posteados</option></select><input id="f-q" type="search" placeholder="Buscar por nota o categoría" value="${esc(filtro.q)}" autocomplete="off"></div><div id="mov-lista" style="display:grid; gap:14px"></div>`;
   }
   function renderMovLista() {
@@ -1255,7 +1320,9 @@
         <div class="frow"><label for="m-fecha">Fecha</label><input id="m-fecha" type="date" value="${x ? x.fecha : hoyISO()}"></div>
         <div class="frow"><label for="m-nota">Nota</label><input id="m-nota" type="text" placeholder="Opcional" value="${esc(notaIni)}" autocomplete="off"></div>
         <div class="frow"><label for="m-post" style="width:auto; flex:1">Ya aparece en el banco</label><input id="m-post" class="switch" type="checkbox" ${x && x.posteado ? 'checked' : ''}></div>
+        ${x ? '' : `<div class="frow"><label for="m-rep">Repetir</label><select id="m-rep"><option value="">Nunca</option>${Object.entries(FRECS).map(([k, [n]]) => `<option value="${k}">${n}</option>`).join('')}</select></div>`}
       </div>
+      ${x && x.recurrenteId && S.recurrentes.some((r) => r.id === x.recurrenteId) ? `<button class="btn block tinted" type="button" data-act="editar-rec" data-id="${x.recurrenteId}">Parte de un movimiento programado · Editar</button>` : ''}
       <p class="note" id="m-hint" style="margin-top:-8px"></p>
       <p class="form-error" id="m-error" role="alert"></p>
       ${x ? '<button class="btn block destructive" type="button" id="m-borrar">Eliminar movimiento</button>' : ''}
@@ -1282,15 +1349,89 @@
       else if (!fecha) err = 'Elige la fecha.';
       else if (tipo === 'transferencia' && cId === dId) err = 'Elige dos cuentas distintas para la transferencia.';
       if (err) { $('#m-error', b).textContent = err; return; }
-      const nuevo = { id: x ? x.id : nuevoId('m'), tipo, monto: Math.round(monto * 100) / 100, cuentaId: cId, cuentaDestinoId: tipo === 'transferencia' ? dId : null, categoriaId: tipo === 'transferencia' ? null : ($('#m-cat', b).value || null), fecha, nota: $('#m-nota', b).value.trim(), posteado: $('#m-post', b).checked, creado: x ? x.creado : new Date().toISOString() };
+      const nuevo = { id: x ? x.id : nuevoId('m'), tipo, monto: Math.round(monto * 100) / 100, cuentaId: cId, cuentaDestinoId: tipo === 'transferencia' ? dId : null, categoriaId: tipo === 'transferencia' ? null : ($('#m-cat', b).value || null), fecha, nota: $('#m-nota', b).value.trim(), posteado: $('#m-post', b).checked, recurrenteId: x ? x.recurrenteId || null : null, creado: x ? x.creado : new Date().toISOString() };
+      const rep = !x && $('#m-rep', b) ? $('#m-rep', b).value : '';
+      if (rep) { const r = { id: nuevoId('r'), tipo, monto: nuevo.monto, cuentaId: cId, cuentaDestinoId: nuevo.cuentaDestinoId, categoriaId: nuevo.categoriaId, nota: nuevo.nota, frecuencia: rep, inicio: fecha, fin: '', hasta: fecha, modo: 'auto' }; S.recurrentes.push(r); nuevo.recurrenteId = r.id; }
       if (x) S.movimientos[S.movimientos.indexOf(x)] = nuevo; else S.movimientos.push(nuevo);
-      guardar(); cerrarSheet(); toast(x ? 'Movimiento actualizado' : 'Movimiento guardado');
+      guardar(); cerrarSheet(); toast(x ? 'Movimiento actualizado' : rep ? `Guardado y programado: ${FRECS[rep][0].toLowerCase()}` : 'Movimiento guardado');
+      if (rep) procesarRecurrentes();
       if (vista === 'movimientos' && fecha.slice(0, 7) !== mesMov && !x) mesMov = fecha.slice(0, 7);
       render();
     });
     if (x) $('#m-borrar', b).addEventListener('click', async () => {
       if (!(await confirmar('¿Eliminar movimiento?', 'Se quita de tus cuentas y de tu presupuesto.'))) return;
       S.movimientos = S.movimientos.filter((m) => m.id !== x.id); guardar(); cerrarSheet(); toast('Movimiento eliminado'); render();
+    });
+  }
+
+  // ----- Programados -----
+  function sheetProgramados() {
+    const lista = S.recurrentes.slice().sort((a, b) => (siguiente(a) || '9').localeCompare(siguiente(b) || '9'));
+    abrirSheet(`${cabeza('Programados', false)}<div style="display:grid; gap:14px">
+      ${lista.length ? `<div class="group">${lista.map((r) => { const x = partesRec(r), sg = siguiente(r); return `<button class="row" type="button" data-act="editar-rec" data-id="${r.id}">${x.ic}<span class="rt"><span class="t1">${esc(x.titulo)}</span><span class="t2">${esc(FRECS[r.frecuencia][0] + ' · ' + (sg ? 'próximo ' + fCorta(sg) : 'terminado') + (r.modo === 'auto' ? '' : ' · te pregunta'))}</span><span class="t2">${esc(x.cuentas)}</span></span>${x.amt}</button>`; }).join('')}</div>` : `<div class="empty" style="background:var(--sheet-card)"><strong>Sin movimientos programados</strong>Programa tu renta, suscripciones, el pago de tu tarjeta o tu sueldo, y la app los registra en su fecha.</div>`}
+      <button class="btn block" type="button" data-act="nuevo-rec">Programar movimiento</button>
+      <p class="note" style="margin-top:0">También puedes elegir «Repetir» al registrar un movimiento nuevo.</p>
+    </div>`);
+  }
+  function sheetRec(id) {
+    if (!S.cuentas.length) { sheetMov(null); return; }
+    const r = id ? S.recurrentes.find((x) => x.id === id) : null;
+    let tipo = r ? r.tipo : 'gasto';
+    const ops = (sel) => S.cuentas.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
+    const c0 = r ? r.cuentaId : (S.cuentas.find((c) => c.tipo === 'cheques') || S.cuentas[0]).id;
+    const d0 = r && r.cuentaDestinoId ? r.cuentaDestinoId : (S.cuentas.find((c) => c.id !== c0 && c.tipo === 'tarjeta') || S.cuentas.find((c) => c.id !== c0) || S.cuentas[0]).id;
+    const b = abrirSheet(`<form id="form-rec" novalidate>${cabeza(r ? 'Editar programado' : 'Programar movimiento')}<div style="display:grid; gap:18px">
+      <div class="seg" role="group" aria-label="Tipo"><button type="button" data-tipo="gasto">Pago</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferencia</button></div>
+      <div class="monto"><span>$</span><input id="r-monto" class="money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${r ? fmtNum(r.monto) : ''}" autofocus></div>
+      <div class="group">
+        <div class="frow"><label for="r-nota">Nombre</label><input id="r-nota" type="text" placeholder="Ej. Renta, Netflix, Sueldo" value="${r ? esc(r.nota) : ''}" autocomplete="off"></div>
+        <div class="frow"><label for="r-cuenta" id="rl-cuenta">Pagado con</label><select id="r-cuenta">${ops(c0)}</select></div>
+        <div class="frow" id="rr-dest"><label for="r-dest">Hacia</label><select id="r-dest">${ops(d0)}</select></div>
+        <div class="frow" id="rr-cat"><label for="r-cat">Categoría</label><select id="r-cat"></select></div>
+      </div>
+      <div class="group">
+        <div class="frow"><label for="r-frec">Se repite</label><select id="r-frec">${Object.entries(FRECS).map(([k, [n]]) => `<option value="${k}" ${(r ? r.frecuencia : 'mensual') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        <div class="frow"><label for="r-ini">${r ? 'A partir del' : 'Primera fecha'}</label><input id="r-ini" type="date" value="${r ? r.inicio : hoyISO()}"></div>
+        <div class="frow"><label for="r-fin">Termina</label><input id="r-fin" type="date" value="${r ? r.fin : ''}" aria-describedby="r-hint"></div>
+        <div class="frow"><label for="r-auto" class="lbl-w">Registrar automáticamente</label><input id="r-auto" class="switch" type="checkbox" ${!r || r.modo === 'auto' ? 'checked' : ''}></div>
+      </div>
+      <p class="note" id="r-hint"></p>
+      <p class="form-error" id="r-error" role="alert"></p>
+      ${r ? '<button class="btn block destructive" type="button" id="r-borrar">Eliminar programación</button>' : ''}
+    </div></form>`);
+    const pintar = () => {
+      b.querySelectorAll('.seg button').forEach((bt) => bt.classList.toggle('on', bt.dataset.tipo === tipo));
+      $('#rr-dest', b).hidden = tipo !== 'transferencia';
+      $('#rr-cat', b).hidden = tipo === 'transferencia';
+      $('#rl-cuenta', b).textContent = tipo === 'transferencia' ? 'Desde' : tipo === 'ingreso' ? 'A la cuenta' : 'Pagado con';
+      const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto', sel = r && r.tipo === tipo ? r.categoriaId : $('#r-cat', b).value, lista = S.categorias.filter((c) => c.tipo === tc);
+      $('#r-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
+      $('#r-cat', b).value = lista.some((c) => c.id === sel) ? sel : (lista[0] ? lista[0].id : '');
+      const ini = $('#r-ini', b).value, auto = $('#r-auto', b).checked;
+      const atras = !r && ini && ini < hoyISO();
+      $('#r-hint', b).textContent = (auto ? 'Se registra solo en cada fecha, como pendiente de postear. ' : 'En cada fecha te aparece en Resumen para que lo registres o lo saltes. ') + (atras ? 'Como la primera fecha ya pasó, también se registran los de esa fecha a hoy. ' : '') + 'Deja «Termina» vacío si no tiene fin.';
+    };
+    pintar();
+    b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
+    ['#r-ini', '#r-auto'].forEach((q) => $(q, b).addEventListener('change', pintar));
+    $('#form-rec', b).addEventListener('submit', (e) => {
+      e.preventDefault();
+      const monto = parseMonto($('#r-monto', b).value), cId = $('#r-cuenta', b).value, dId = $('#r-dest', b).value, ini = $('#r-ini', b).value, fin = $('#r-fin', b).value;
+      let err = '';
+      if (!(monto > 0)) err = 'Escribe una cantidad mayor a 0.';
+      else if (!ini) err = 'Elige la primera fecha.';
+      else if (fin && fin < ini) err = 'La fecha de fin no puede ser antes de la primera fecha.';
+      else if (tipo === 'transferencia' && cId === dId) err = 'Elige dos cuentas distintas.';
+      if (err) { $('#r-error', b).textContent = err; return; }
+      const datos = { tipo, monto: Math.round(monto * 100) / 100, cuentaId: cId, cuentaDestinoId: tipo === 'transferencia' ? dId : null, categoriaId: tipo === 'transferencia' ? null : ($('#r-cat', b).value || null), nota: $('#r-nota', b).value.trim(), frecuencia: $('#r-frec', b).value, inicio: ini, fin, modo: $('#r-auto', b).checked ? 'auto' : 'confirmar' };
+      if (r) Object.assign(r, datos); else S.recurrentes.push({ id: nuevoId('r'), hasta: '', ...datos });
+      guardar(); cerrarSheet(); toast(r ? 'Programado actualizado' : 'Movimiento programado'); procesarRecurrentes(); render();
+    });
+    if (r) $('#r-borrar', b).addEventListener('click', async () => {
+      if (!(await confirmar('¿Eliminar programación?', 'Ya no se registrarán nuevos. Los movimientos que ya se registraron se quedan.'))) return;
+      S.recurrentes = S.recurrentes.filter((x) => x.id !== r.id);
+      S.movimientos.forEach((m) => { if (m.recurrenteId === r.id) m.recurrenteId = null; });
+      guardar(); cerrarSheet(); toast('Programación eliminada'); render();
     });
   }
 
@@ -1339,6 +1480,7 @@
         if (!(await confirmar('¿Eliminar cuenta?', n ? `También se borrarán sus ${n} movimientos.` : 'La cuenta no tiene movimientos.'))) return;
         S.cuentas = S.cuentas.filter((x) => x.id !== c.id);
         S.movimientos = S.movimientos.filter((m) => m.cuentaId !== c.id && m.cuentaDestinoId !== c.id);
+        S.recurrentes = S.recurrentes.filter((r) => r.cuentaId !== c.id && r.cuentaDestinoId !== c.id);
         if (filtro.cuenta === c.id) filtro.cuenta = '';
         guardar(); cerrarSheet(); toast('Cuenta eliminada'); render();
       });
@@ -1378,6 +1520,7 @@
       if (!(await confirmar('¿Eliminar categoría?', n ? `Sus ${n} movimientos se quedan, pero sin categoría.` : 'No tiene movimientos.'))) return;
       S.categorias = S.categorias.filter((x) => x.id !== c.id);
       S.movimientos.forEach((m) => { if (m.categoriaId === c.id) m.categoriaId = null; });
+      S.recurrentes.forEach((r) => { if (r.categoriaId === c.id) r.categoriaId = null; });
       if (filtro.cat === c.id) filtro.cat = '';
       guardar(); cerrarSheet(); toast('Categoría eliminada'); render();
     });
@@ -1453,7 +1596,7 @@
     if (cambio > copia) return { ok: false, t: 'Tienes cambios sin guardar en tu copia' };
     return { ok: true, t: 'Copia al día · ' + new Date(copia).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) };
   }
-  function hayDatos() { return S.cuentas.length || S.movimientos.length || S.prestamos.length || S.metas.length || S.config.ingresoMensual; }
+  function hayDatos() { return S.cuentas.length || S.movimientos.length || S.prestamos.length || S.metas.length || S.recurrentes.length || S.config.ingresoMensual; }
   function estadoCopia() { const c = textoCopia(); document.querySelectorAll('[data-dot]').forEach((d) => { d.hidden = c.ok || !hayDatos(); }); }
   function sheetAjustes() {
     const c = textoCopia(), lk = lockCfg();
@@ -1691,6 +1834,9 @@
     'mes-mov': (t) => { mesMov = addMes(mesMov, +t.dataset.d); render(); },
     'mes-pres': (t) => { mesPres = addMes(mesPres, +t.dataset.d); render(); },
     'limpiar-filtros': () => { filtro.cuenta = ''; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; render(); },
+    'programados': () => sheetProgramados(), 'nuevo-rec': () => sheetRec(null), 'editar-rec': (t) => sheetRec(t.dataset.id),
+    'rec-confirmar': (t) => { const r = S.recurrentes.find((x) => x.id === t.dataset.id); if (!r) return; S.movimientos.push(movDeRec(r, t.dataset.f)); r.hasta = t.dataset.f; guardar(); render(); toast('Movimiento registrado'); },
+    'rec-saltar': (t) => { const r = S.recurrentes.find((x) => x.id === t.dataset.id); if (!r) return; r.hasta = t.dataset.f; guardar(); render(); toast('Se saltó esta vez'); },
     'postear': (t) => { const x = S.movimientos.find((m) => m.id === t.dataset.id); if (!x) return; x.posteado = !x.posteado; guardar(); if (vista === 'movimientos') renderMovLista(); else render(); },
     'nuevo-prest': () => sheetPrest(null), 'editar-prest': (t) => sheetPrest(t.dataset.id),
     'abrir-prest': (t) => { prestAbierto = t.dataset.id; render(); window.scrollTo(0, 0); },
@@ -1779,7 +1925,7 @@
     let estadoIni;
     try { estadoIni = await cargar(); } catch (e) { S = normalizarEstado(lsGet('finanzas_v1') || {}); }
     if (cifradoOk) await revisarBio();
-    if (estadoIni === 'bloqueada') mostrarLock(); else { render(); snapDiario(); }
+    if (estadoIni === 'bloqueada') mostrarLock(); else { procesarRecurrentes(); render(); snapDiario(); }
     // Pide al sistema que no borre los datos de la app para liberar espacio
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   })();
