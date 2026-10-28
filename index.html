@@ -551,15 +551,38 @@
     out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)), claveCopia: s.config && typeof s.config.claveCopia === 'string' ? s.config.claveCopia : '', recordatorioDias: [0, 1, 7, 14, 30].includes(s.config && s.config.recordatorioDias) ? s.config.recordatorioDias : 7 };
     return out;
   }
-  function cargar() {
-    if (lockCfg() && lsGet('finanzas_enc')) { S = normalizarEstado({}); return 'bloqueada'; }
-    if (lockCfg()) lsDel('bloqueo');
-    const g = lsGet('finanzas_v1');
-    if (g) { S = normalizarEstado(g); return; }
+  // Almacenamiento principal: IndexedDB (sin el límite de ~5 MB de localStorage). Si no está disponible, localStorage.
+  // Los datos de versiones anteriores que estaban en localStorage se pasan solos la primera vez.
+  const LSK = { estado: 'finanzas_v1', estado_enc: 'finanzas_enc' };
+  let usarIdb = !!window.indexedDB;
+  async function leer(k) {
+    if (usarIdb) {
+      try { const v = await idbGet(k); if (v !== undefined && v !== null) return { v, deLS: false }; }
+      catch (e) { usarIdb = false; }
+    }
+    const v = lsGet(LSK[k]);
+    return v ? { v, deLS: true } : null;
+  }
+  async function escribir(k, v) {
+    if (usarIdb) {
+      try { await idbPut(k, v); lsDel(LSK[k]); return; }
+      catch (e) { usarIdb = false; }
+    }
+    lsSet(LSK[k], v);
+  }
+  async function borrarClave(k) { try { await idbDel(k); } catch (e) {} lsDel(LSK[k]); }
+  async function cargar() {
+    if (lockCfg()) {
+      const e = await leer('estado_enc');
+      if (e) { if (e.deLS) await escribir('estado_enc', e.v); S = normalizarEstado({}); return 'bloqueada'; }
+      lsDel('bloqueo');
+    }
+    const g = await leer('estado');
+    if (g) { S = normalizarEstado(g.v); if (g.deLS) await escribir('estado', JSON.parse(JSON.stringify(S))); return; }
     S = normalizarEstado({});
     const viejos = lsGet('prestamos_v2') || desdeFormatoViejo(lsGet('prestamos'), lsGet('pagosExtras'));
     if (Array.isArray(viejos) && viejos.length) S.prestamos = viejos.map(normalizarPrestamo);
-    lsSet('finanzas_v1', S);
+    await escribir('estado', JSON.parse(JSON.stringify(S)));
   }
   // ================= Seguridad =================
   // Con el bloqueo activo, los datos se guardan cifrados (AES-GCM de 256 bits) con una llave que sale de tu código
@@ -585,8 +608,11 @@
     if (lockCfg()) {
       if (!sesion.key) return;
       const snap = JSON.parse(JSON.stringify(S)), key = sesion.key;
-      cadena = cadena.then(() => cifrar(key, snap)).then((c) => lsSet('finanzas_enc', c)).catch(() => toast('No se pudo guardar el cambio. Inténtalo otra vez.'));
-    } else lsSet('finanzas_v1', S);
+      cadena = cadena.then(() => cifrar(key, snap)).then((c) => escribir('estado_enc', c)).catch(() => toast('No se pudo guardar el cambio. Inténtalo otra vez.'));
+    } else {
+      const snap = JSON.parse(JSON.stringify(S));
+      cadena = cadena.then(() => escribir('estado', snap)).catch(() => toast('No se pudo guardar el cambio. Inténtalo otra vez.'));
+    }
   }
   function guardar() { persistir(); lsSet('ultimo_cambio', Date.now()); estadoCopia(); }
 
@@ -635,27 +661,30 @@
   async function activarBloqueo(pin) {
     const viejo = sesion.key;
     const salt = rnd(16), key = await derivar(pin, salt, ITER_PIN);
-    lsSet('finanzas_enc', await cifrar(key, S));
+    await cadena;
+    await escribir('estado_enc', await cifrar(key, JSON.parse(JSON.stringify(S))));
     const prev = lockCfg();
     lsSet('bloqueo', { v: 1, salt: b64(salt), iter: ITER_PIN, ...(prev && prev.bio ? { bio: prev.bio } : {}) });
     sesion.key = key;
-    ['finanzas_v1', 'prestamos_v2', 'prestamos', 'pagosExtras'].forEach(lsDel);
+    await borrarClave('estado');
+    ['prestamos_v2', 'prestamos', 'pagosExtras'].forEach(lsDel);
     if (prev && prev.bio) { try { await idbPut('aes', key); } catch (e) { const c = lockCfg(); delete c.bio; lsSet('bloqueo', c); } }
     await recifrarSnaps(viejo, key);
   }
   async function probarPin(pin) {
-    const c = lockCfg(), e = lsGet('finanzas_enc');
     await cadena;
+    const c = lockCfg(), r = await leer('estado_enc'), e = r && r.v;
     const key = await derivar(pin, unb64(c.salt), c.iter);
     const datos = await descifrar(key, e.iv, e.ct);
     return { key, datos };
   }
   async function quitarBloqueo() {
     await cadena;
-    lsSet('finanzas_v1', S);
+    await escribir('estado', JSON.parse(JSON.stringify(S)));
     await recifrarSnaps(sesion.key, null);
     try { await idbDel('aes'); } catch (e) {}
-    ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel);
+    await borrarClave('estado_enc');
+    ['bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel);
     sesion.key = null;
   }
   async function activarBio() {
@@ -678,7 +707,7 @@
     try {
       await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: unb64(c.bio) }], userVerification: 'required', timeout: 60000 } });
       const key = await idbGet('aes'); if (!key) return false;
-      const e = lsGet('finanzas_enc');
+      const r = await leer('estado_enc'); const e = r && r.v;
       desbloqueado(key, await descifrar(key, e.iv, e.ct));
       return true;
     } catch (e) { return false; }
@@ -755,7 +784,8 @@
   $('#lk-olvide').addEventListener('click', async () => {
     if (!(await confirmar('¿Olvidaste tu código?', 'Por seguridad, sin el código no se pueden abrir tus datos. Puedes borrarlos y luego cargar tu última copia con «Abrir copia».', 'Borrar y empezar'))) return;
     try { await idbDel('aes'); } catch (e) {}
-    ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta', 'finanzas_v1', 'ultima_copia', 'ultimo_cambio'].forEach(lsDel);
+    await borrarClave('estado_enc'); await borrarClave('estado');
+    ['bloqueo', 'bloqueo_fallos', 'bloqueo_hasta', 'ultima_copia', 'ultimo_cambio'].forEach(lsDel);
     await borrarSnaps();
     desbloqueado(null, {});
     persistir();
@@ -1669,7 +1699,7 @@
     'borrar-todo': async () => {
       if (!(await confirmar('¿Borrar todos los datos?', 'Se borran cuentas, movimientos, presupuesto, metas y préstamos de este dispositivo. Guarda una copia antes si la necesitas.', 'Borrar todo'))) return;
       try { await idbDel('aes'); } catch (e) {}
-      ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel); sesion.key = null; cacheClave = null; await borrarSnaps();
+      await borrarClave('estado_enc'); ['bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel); sesion.key = null; cacheClave = null; await borrarSnaps();
       S = normalizarEstado({}); cacheAm.clear(); prestAbierto = null; guardar(); lsSet('ultima_copia', 0); cerrarSheet(); render(); toast('Datos borrados');
     }
   };
@@ -1734,12 +1764,16 @@
   window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VISTAS[v] && v !== vista) { vista = v; prestAbierto = null; render(); } });
 
   // ================= Inicio =================
-  const estadoIni = cargar();
   const h = location.hash.slice(1);
   if (VISTAS[h]) vista = h;
-  if (cifradoOk) revisarBio().then(() => { if (estadoIni === 'bloqueada') mostrarLock(); });
-  else if (estadoIni === 'bloqueada') mostrarLock();
-  if (estadoIni !== 'bloqueada') { render(); snapDiario(); }
+  (async () => {
+    let estadoIni;
+    try { estadoIni = await cargar(); } catch (e) { S = normalizarEstado(lsGet('finanzas_v1') || {}); }
+    if (cifradoOk) await revisarBio();
+    if (estadoIni === 'bloqueada') mostrarLock(); else { render(); snapDiario(); }
+    // Pide al sistema que no borre los datos de la app para liberar espacio
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  })();
 })();
 </script>
 <script>
