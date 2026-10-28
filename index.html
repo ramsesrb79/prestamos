@@ -342,6 +342,8 @@
   @media (max-height: 680px) { .pad { grid-template-columns: repeat(3, 64px); gap: 10px 20px; } .pad button { width: 64px; height: 64px; font-size: 28px; } }
   .frow .lbl-w { width: auto; flex: 1; }
   .field-pass { width: 100%; font: 400 17px var(--font); color: var(--label); background: var(--sheet-card); border: 0; border-radius: 10px; padding: 13px 16px; }
+  .aviso { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .aviso-btns { display: flex; gap: 14px; align-items: center; margin-left: auto; }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(100px + env(safe-area-inset-bottom, 0px)); z-index: 70; background: rgba(30, 30, 32, .92); color: #fff; padding: 12px 18px; border-radius: 14px; font: 500 15px var(--font); width: max-content; max-width: calc(100% - 32px); text-align: center; }
   @media (min-width: 900px) { .toast { bottom: 28px; } }
 </style>
@@ -546,7 +548,7 @@
     }).filter((m) => m.tipo !== 'transferencia' || m.cuentaDestinoId);
     out.metas = (Array.isArray(s.metas) ? s.metas : []).filter((m) => m && m.id).map((m) => ({ id: String(m.id), nombre: String(m.nombre || 'Meta'), objetivo: Math.max(0, num(m.objetivo)), ahorrado: Math.max(0, num(m.ahorrado)), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : '', color: PALETA.includes(m.color) ? m.color : 'green' }));
     out.prestamos = (Array.isArray(s.prestamos) ? s.prestamos : []).map(normalizarPrestamo);
-    out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)), claveCopia: s.config && typeof s.config.claveCopia === 'string' ? s.config.claveCopia : '' };
+    out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)), claveCopia: s.config && typeof s.config.claveCopia === 'string' ? s.config.claveCopia : '', recordatorioDias: [0, 1, 7, 14, 30].includes(s.config && s.config.recordatorioDias) ? s.config.recordatorioDias : 7 };
     return out;
   }
   function cargar() {
@@ -593,9 +595,45 @@
   const idbPut = (k, v) => idbOp('readwrite', (st) => st.put(v, k));
   const idbGet = (k) => idbOp('readonly', (st) => st.get(k));
   const idbDel = (k) => idbOp('readwrite', (st) => st.delete(k));
+  const idbKeys = () => idbOp('readonly', (st) => st.getAllKeys());
+
+  // ----- Copias automáticas en el dispositivo: una por día que abres la app, se guardan las últimas 10 -----
+  const MAX_SNAPS = 10;
+  async function listaSnaps() { try { return ((await idbKeys()) || []).filter((k) => String(k).startsWith('snap:')).sort().reverse(); } catch (e) { return []; } }
+  async function empaquetar(datos, key) { return key ? { enc: 1, ...(await cifrar(key, datos)) } : { enc: 0, datos }; }
+  async function desempaquetar(v, key) { if (!v) throw new Error('vacía'); if (v.enc) { if (!key) throw new Error('sin llave'); return descifrar(key, v.iv, v.ct); } return v.datos; }
+  async function snapDiario() {
+    try {
+      if (!window.indexedDB || !hayDatos() || sesion.bloqueada) return;
+      if (lockCfg() && !sesion.key) return;
+      const hoy = hoyISO();
+      if (lsGet('ultimo_snap') === hoy) return;
+      await idbPut('snap:' + hoy, { fecha: new Date().toISOString(), resumen: [[S.cuentas.length, 'cuenta', 'cuentas'], [S.movimientos.length, 'movimiento', 'movimientos'], [S.prestamos.length, 'préstamo', 'préstamos']].map(([n, u, v]) => `${n} ${n === 1 ? u : v}`).join(' · '), ...(await empaquetar(JSON.parse(JSON.stringify(S)), lockCfg() ? sesion.key : null)) });
+      lsSet('ultimo_snap', hoy);
+      const ks = await listaSnaps();
+      for (const k of ks.slice(MAX_SNAPS)) await idbDel(k);
+    } catch (e) {}
+  }
+  async function recifrarSnaps(viejo, nuevo) {
+    for (const k of await listaSnaps()) {
+      try { const v = await idbGet(k); const d = await desempaquetar(v, viejo); await idbPut(k, { fecha: v.fecha, resumen: v.resumen, ...(await empaquetar(d, nuevo)) }); }
+      catch (e) { try { await idbDel(k); } catch (er) {} }
+    }
+  }
+  async function borrarSnaps() { for (const k of await listaSnaps()) { try { await idbDel(k); } catch (e) {} } lsDel('ultimo_snap'); }
+  function recordatorioCopia() {
+    const dias = S.config.recordatorioDias;
+    if (!dias || !hayDatos()) return null;
+    const copia = lsGet('ultima_copia') || 0, cambio = lsGet('ultimo_cambio') || 0, pos = lsGet('copia_pospuesta') || 0;
+    if (Date.now() - pos < 864e5) return null;
+    if (copia && cambio <= copia) return null;
+    if (copia && (Date.now() - copia) / 864e5 < dias) return null;
+    return { nunca: !copia, dias: copia ? Math.floor((Date.now() - copia) / 864e5) : 0 };
+  }
   async function revisarBio() { try { bioOk = !!(window.PublicKeyCredential && window.isSecureContext && window.indexedDB && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { bioOk = false; } }
 
   async function activarBloqueo(pin) {
+    const viejo = sesion.key;
     const salt = rnd(16), key = await derivar(pin, salt, ITER_PIN);
     lsSet('finanzas_enc', await cifrar(key, S));
     const prev = lockCfg();
@@ -603,6 +641,7 @@
     sesion.key = key;
     ['finanzas_v1', 'prestamos_v2', 'prestamos', 'pagosExtras'].forEach(lsDel);
     if (prev && prev.bio) { try { await idbPut('aes', key); } catch (e) { const c = lockCfg(); delete c.bio; lsSet('bloqueo', c); } }
+    await recifrarSnaps(viejo, key);
   }
   async function probarPin(pin) {
     const c = lockCfg(), e = lsGet('finanzas_enc');
@@ -614,6 +653,7 @@
   async function quitarBloqueo() {
     await cadena;
     lsSet('finanzas_v1', S);
+    await recifrarSnaps(sesion.key, null);
     try { await idbDel('aes'); } catch (e) {}
     ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel);
     sesion.key = null;
@@ -704,6 +744,7 @@
     lsSet('bloqueo_fallos', 0); lsDel('bloqueo_hasta');
     $('#lock').hidden = true; $('#lk-box').innerHTML = ''; padActivo = null;
     render();
+    snapDiario();
   }
   function bloquearAhora() {
     if (!lockCfg()) return;
@@ -715,6 +756,7 @@
     if (!(await confirmar('¿Olvidaste tu código?', 'Por seguridad, sin el código no se pueden abrir tus datos. Puedes borrarlos y luego cargar tu última copia con «Abrir copia».', 'Borrar y empezar'))) return;
     try { await idbDel('aes'); } catch (e) {}
     ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta', 'finanzas_v1', 'ultima_copia', 'ultimo_cambio'].forEach(lsDel);
+    await borrarSnaps();
     desbloqueado(null, {});
     persistir();
     toast('Datos borrados. Usa «Abrir copia» en Ajustes para recuperarlos.');
@@ -863,6 +905,8 @@
     const fechaLarga = cap(hoy.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }));
     const acciones = `<button class="icon-btn" type="button" data-act="ajustes" aria-label="Ajustes y copia">${IC.ajustes}<span class="dot" data-dot hidden></span></button>${btnMas('nuevo-mov', 'Nuevo movimiento')}`;
     let html = encabezado('Resumen', fechaLarga, acciones);
+    const rc = recordatorioCopia();
+    if (rc) html += `<section class="card aviso"><span class="ic" style="--c:var(--c-orange)">${IC.caja}</span><div class="rt" style="flex:1 1 180px"><span class="t1" style="white-space:normal; font-weight:600">${rc.nunca ? 'Todavía no guardas una copia' : `Hace ${rc.dias} ${rc.dias === 1 ? 'día' : 'días'} que no guardas una copia`}</span><span class="t2" style="white-space:normal">Guárdala en iCloud Drive o donde prefieras, por si cambias o pierdes el teléfono.</span></div><div class="aviso-btns"><button class="btn small" type="button" data-act="guardar-copia">Guardar copia</button><button class="link sm" type="button" data-act="posponer-copia">Mañana</button></div></section>`;
 
     const pasos = [
       { ok: S.cuentas.length > 0, t: 'Agrega tus cuentas', s: 'Cheques, ahorro, efectivo y tarjetas', act: 'nueva-cuenta' },
@@ -1384,6 +1428,10 @@
       <div class="group"><div class="row plain" style="cursor:default"><span class="ic" style="--c:var(--c-${c.ok ? 'green' : 'orange'})">${c.ok ? IC.check : '!'}</span><span class="rt"><span class="t1">${esc(c.t)}</span><span class="t2">Tus datos se guardan solo en este dispositivo</span></span></div></div>
       <div class="sheet-actions"><button class="btn block" type="button" data-act="guardar-copia">Guardar copia</button><button class="btn block tinted" type="button" data-act="abrir-copia">Abrir copia</button></div>
       <p class="note" style="margin-top:0">«Guardar copia» crea el archivo <b>mis-finanzas.json</b>${cifradoOk ? ', cifrado con tu contraseña de copias' : ''}. Guárdalo donde prefieras: iCloud Drive, Google Drive, OneDrive o tu computadora. En otro dispositivo, usa «Abrir copia» para cargar todo.</p>
+      <div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Copias automáticas</p><div class="group">
+        <div class="frow"><label for="z-rec">Recordarme</label><select id="z-rec">${[[1, 'Cada día'], [7, 'Cada semana'], [14, 'Cada 2 semanas'], [30, 'Cada mes'], [0, 'Nunca']].map(([v, n]) => `<option value="${v}" ${S.config.recordatorioDias === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        <button class="row plain" type="button" id="z-snaps"><span class="rt"><span class="t1">Copias en este dispositivo</span><span class="t2">Una por cada día que abres la app · últimas ${MAX_SNAPS}</span></span><span class="amt" style="color:var(--tint)">Ver</span></button>
+      </div><p class="note">Apple no deja que una página web guarde archivos sola en iCloud, así que la app te avisa en Resumen cuando toca guardar tu copia y lo haces con un toque.</p></div>
       ${cifradoOk ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Seguridad</p><div class="group">
         <div class="frow"><label for="z-lock" class="lbl-w">Bloquear con código</label><input id="z-lock" class="switch" type="checkbox" ${lk ? 'checked' : ''}></div>
         ${lk && bioOk ? `<div class="frow"><label for="z-bio" class="lbl-w">Usar Face ID o Touch ID</label><input id="z-bio" class="switch" type="checkbox" ${lk.bio ? 'checked' : ''}></div>` : ''}
@@ -1392,6 +1440,8 @@
       </div><p class="note">${lk ? 'La app se bloquea al abrirla y cuando la dejas más de un minuto. Tus datos están cifrados con tu código.' : 'Con el bloqueo, la app pide tu código al abrirse y tus datos se guardan cifrados en el dispositivo.'}</p></div>` : '<p class="note">El bloqueo y las copias cifradas funcionan cuando abres la app desde su dirección web (https).</p>'}
       <button class="btn block destructive" type="button" data-act="borrar-todo">Borrar todos los datos</button>
     </div>`);
+    $('#z-rec', b).addEventListener('change', (e) => { S.config.recordatorioDias = +e.target.value; guardar(); lsDel('copia_pospuesta'); toast('Recordatorio actualizado'); });
+    $('#z-snaps', b).addEventListener('click', () => sheetSnaps());
     if (!cifradoOk) return b;
     $('#z-lock', b).addEventListener('change', (e) => { e.target.checked = !!lk; sheetPin(lk ? 'quitar' : 'crear'); });
     const bio = $('#z-bio', b);
@@ -1399,6 +1449,26 @@
     if (lk) { $('#z-cambiar', b).addEventListener('click', () => sheetPin('cambiar')); $('#z-ahora', b).addEventListener('click', () => bloquearAhora()); }
     $('#z-clave', b).addEventListener('click', () => sheetClaveCopia(false));
     return b;
+  }
+  async function sheetSnaps() {
+    const b = abrirSheet(`<div class="sheet-head"><button class="link" type="button" id="sn-back">Ajustes</button><h2>Copias en este dispositivo</h2><span></span></div><div id="sn-list" class="group"><div class="row plain"><span class="rt"><span class="t2">Cargando…</span></span></div></div><p class="note">Sirven para regresar a como estaban tus datos un día anterior, por ejemplo si borraste algo por error. Se guardan dentro del teléfono: si lo pierdes o lo cambias, se van con él. Para eso usa «Guardar copia».</p>`);
+    $('#sn-back', b).addEventListener('click', () => sheetAjustes());
+    const ks = await listaSnaps();
+    const el = $('#sn-list', b); if (!el) return;
+    if (!ks.length) { el.innerHTML = '<div class="row plain"><span class="rt"><span class="t1">Todavía no hay copias</span><span class="t2">Se crea la primera la próxima vez que abras la app con datos.</span></span></div>'; return; }
+    const items = [];
+    for (const k of ks) { try { items.push({ k, v: await idbGet(k) }); } catch (e) {} }
+    el.innerHTML = items.map(({ k, v }) => `<div class="row plain" style="cursor:default"><span class="rt"><span class="t1">${esc(cap(parseISO(k.slice(5)).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })))}</span><span class="t2">${esc(v && v.resumen || '')}</span></span><button class="btn small tinted" type="button" data-snap="${esc(k)}">Restaurar</button></div>`).join('');
+    el.addEventListener('click', async (e) => {
+      const bt = e.target.closest('[data-snap]'); if (!bt) return;
+      if (!(await confirmar('¿Restaurar esta copia?', 'Tus datos regresan a como estaban ese día. Lo que registraste después se pierde, salvo que tengas otra copia.', 'Restaurar'))) return;
+      try {
+        const datos = await desempaquetar(await idbGet(bt.dataset.snap), sesion.key);
+        const clave = S.config.claveCopia;
+        S = normalizarEstado(datos); if (!S.config.claveCopia) S.config.claveCopia = clave;
+        cacheAm.clear(); prestAbierto = null; guardar(); cerrarSheet(); render(); toast('Datos restaurados');
+      } catch (er) { toast('No se pudo abrir esa copia.'); }
+    });
   }
   function sheetPin(modo) {
     const titulos = { crear: 'Bloquear con código', cambiar: 'Cambiar código', quitar: 'Quitar bloqueo' };
@@ -1594,11 +1664,12 @@
     'prest-volver': () => { prestAbierto = null; render(); window.scrollTo(0, 0); },
     'cerrar-sheet': () => cerrarSheet(),
     'guardar-copia': () => guardarCopia(),
+    'posponer-copia': () => { lsSet('copia_pospuesta', Date.now()); render(); toast('Te lo recuerdo mañana'); },
     'abrir-copia': () => $('#archivo').click(),
     'borrar-todo': async () => {
       if (!(await confirmar('¿Borrar todos los datos?', 'Se borran cuentas, movimientos, presupuesto, metas y préstamos de este dispositivo. Guarda una copia antes si la necesitas.', 'Borrar todo'))) return;
       try { await idbDel('aes'); } catch (e) {}
-      ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel); sesion.key = null; cacheClave = null;
+      ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel); sesion.key = null; cacheClave = null; await borrarSnaps();
       S = normalizarEstado({}); cacheAm.clear(); prestAbierto = null; guardar(); lsSet('ultima_copia', 0); cerrarSheet(); render(); toast('Datos borrados');
     }
   };
@@ -1668,7 +1739,7 @@
   if (VISTAS[h]) vista = h;
   if (cifradoOk) revisarBio().then(() => { if (estadoIni === 'bloqueada') mostrarLock(); });
   else if (estadoIni === 'bloqueada') mostrarLock();
-  if (estadoIni !== 'bloqueada') render();
+  if (estadoIni !== 'bloqueada') { render(); snapDiario(); }
 })();
 </script>
 <script>
