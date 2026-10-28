@@ -433,6 +433,7 @@
     caja: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7M12 17v-1.8"/>', 2),
     billete: svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/>', 2),
     tendencia: svg('<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>', 2),
+    retiro: svg('<path d="M3 12a9 9 0 0 1 18 0z"/><path d="M12 12v6.5a2 2 0 0 1-4 0"/>', 2),
     tarjeta: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.6"/><path d="M2.5 9.8h19M6 15h4"/>', 2),
     flechas: svg('<path d="M7 7h12l-3-3M17 17H5l3 3"/>', 2),
     check: svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>', 2.4),
@@ -449,6 +450,7 @@
     ahorro: { n: 'Cuenta de ahorro', c: 'green', i: 'caja' },
     efectivo: { n: 'Efectivo', c: 'teal', i: 'billete' },
     inversion: { n: 'Inversión', c: 'purple', i: 'tendencia' },
+    retiro: { n: 'Cuenta de retiro', c: 'indigo', i: 'retiro' },
     tarjeta: { n: 'Tarjeta de crédito', c: 'orange', i: 'tarjeta' }
   };
   const GRUPOS = { necesidades: 'Necesidades', gustos: 'Gustos', deuda: 'Deudas' };
@@ -535,7 +537,8 @@
     const out = { version: 1, cuentas: [], movimientos: [], categorias: [], metas: [], prestamos: [], recurrentes: [], config: { ingresoMensual: 0, ahorroMensual: 0 } };
     out.cuentas = (Array.isArray(s.cuentas) ? s.cuentas : []).filter((c) => c && c.id).map((c) => ({
       id: String(c.id), nombre: String(c.nombre || 'Cuenta'), tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'cheques',
-      saldoInicial: num(c.saldoInicial), limite: Math.max(0, num(c.limite)), creado: c.creado || new Date().toISOString()
+      saldoInicial: num(c.saldoInicial), limite: Math.max(0, num(c.limite)), creado: c.creado || new Date().toISOString(),
+      historial: Array.isArray(c.historial) ? c.historial.filter((h) => h && /^\d{4}-\d{2}-\d{2}$/.test(h.f || '')).map((h) => ({ f: h.f, v: num(h.v) })).slice(-60) : []
     }));
     const ids = new Set(out.cuentas.map((c) => c.id));
     out.categorias = Array.isArray(s.categorias) && s.categorias.length
@@ -916,10 +919,10 @@
     return { st, ip, ingresoBase, ah, cuotas, pend, prog, sobre, usado, libre: sobre - usado };
   }
   function patrimonio(sal) {
-    let efectivo = 0, inv = 0, tarj = 0;
-    S.cuentas.forEach((c) => { const v = sal[c.id] || 0; if (c.tipo === 'tarjeta') tarj += v; else if (c.tipo === 'inversion') inv += v; else efectivo += v; });
+    let efectivo = 0, inv = 0, ret = 0, tarj = 0;
+    S.cuentas.forEach((c) => { const v = sal[c.id] || 0; if (c.tipo === 'tarjeta') tarj += v; else if (c.tipo === 'inversion') inv += v; else if (c.tipo === 'retiro') ret += v; else efectivo += v; });
     const prest = suma(S.prestamos.map((p) => amortizar(p).saldoHoy));
-    return { efectivo, inv, tarj, prest, neto: efectivo + inv + tarj - prest };
+    return { efectivo, inv, ret, tarj, prest, neto: efectivo + inv + ret + tarj - prest };
   }
 
   // ================= Gráficas =================
@@ -1033,7 +1036,7 @@
     </div></section>`;
 
     html += `<section class="section"><div class="sh"><h2>Lo que tienes</h2><button class="link sm" type="button" data-act="tab" data-v="cuentas">Cuentas</button></div><div class="card"><p class="muted" style="font-size:15px">Patrimonio neto</p><p class="big ${pat.neto < -0.005 ? 'neg' : ''}" style="font:700 34px/1.15 var(--font-r)">${money(pat.neto)}</p>
-      <dl class="kv"><div><dt>Bancos y efectivo</dt><dd>${money(pat.efectivo)}</dd></div>${pat.inv ? `<div><dt>Inversiones</dt><dd>${money(pat.inv)}</dd></div>` : ''}<div><dt>Tarjetas de crédito</dt><dd class="${pat.tarj < -0.005 ? 'neg' : ''}">${money(pat.tarj)}</dd></div><div><dt>Préstamos</dt><dd class="${pat.prest > 0.005 ? 'neg' : ''}">${pat.prest > 0.005 ? '−' : ''}${moneyAbs(pat.prest)}</dd></div></dl></div></section>`;
+      <dl class="kv"><div><dt>Bancos y efectivo</dt><dd>${money(pat.efectivo)}</dd></div>${pat.inv ? `<div><dt>Inversiones</dt><dd>${money(pat.inv)}</dd></div>` : ''}${pat.ret ? `<div><dt>Retiro</dt><dd>${money(pat.ret)}</dd></div>` : ''}<div><dt>Tarjetas de crédito</dt><dd class="${pat.tarj < -0.005 ? 'neg' : ''}">${money(pat.tarj)}</dd></div><div><dt>Préstamos</dt><dd class="${pat.prest > 0.005 ? 'neg' : ''}">${pat.prest > 0.005 ? '−' : ''}${moneyAbs(pat.prest)}</dd></div></dl></div></section>`;
 
     const gastosCat = Object.entries(d.st.porCat).map(([k, v]) => ({ c: cat(k), k, v })).filter((x) => (x.c ? x.c.tipo === 'gasto' : x.k === '_g') && x.v > 0).sort((a, b) => b.v - a.v);
     const top = gastosCat.slice(0, 5).map((x) => ({ v: x.v, color: x.c ? x.c.color : 'gray', n: x.c ? x.c.nombre : 'Sin categoría' }));
@@ -1054,7 +1057,7 @@
   let mesMov = ymHoy();
   const filtro = { cuenta: '', cat: '', q: '', estado: '' };
   function vMovimientos() {
-    const opsC = S.cuentas.map((c) => `<option value="${c.id}" ${filtro.cuenta === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
+    const opsC = S.cuentas.filter((c) => c.tipo !== 'retiro').map((c) => `<option value="${c.id}" ${filtro.cuenta === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     const opsK = S.categorias.map((c) => `<option value="${c.id}" ${filtro.cat === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     return encabezado('Movimientos', '', `<button class="btn small tinted" type="button" data-act="programados">Programados${S.recurrentes.length ? ' · ' + S.recurrentes.length : ''}</button>${btnMas('nuevo-mov', 'Nuevo movimiento')}`) + mnav('mes-mov', mesMov) +
       `<div class="filters"><select id="f-cuenta" aria-label="Filtrar por cuenta"><option value="">Todas las cuentas</option>${opsC}</select><select id="f-cat" aria-label="Filtrar por categoría"><option value="">Todas las categorías</option>${opsK}</select><select id="f-estado" aria-label="Filtrar por estado en el banco"><option value="">Posteados y pendientes</option><option value="pend" ${filtro.estado === 'pend' ? 'selected' : ''}>Solo pendientes</option><option value="post" ${filtro.estado === 'post' ? 'selected' : ''}>Solo posteados</option></select><input id="f-q" type="search" placeholder="Buscar por nota o categoría" value="${esc(filtro.q)}" autocomplete="off"></div><div id="mov-lista" style="display:grid; gap:14px"></div>`;
@@ -1155,11 +1158,11 @@
   // ================= Vista: Cuentas =================
   function vCuentas() {
     const sal = saldos(), pat = patrimonio(sal);
-    let html = encabezado('Cuentas', '', `${S.cuentas.length > 1 ? `<button class="btn small tinted" type="button" data-act="transferir">${IC.flechas.replace('<svg', '<svg style="width:18px;height:18px"')}Transferir</button>` : ''}${btnMas('nueva-cuenta', 'Nueva cuenta')}`);
+    let html = encabezado('Cuentas', '', `${S.cuentas.filter((c) => c.tipo !== 'retiro').length > 1 ? `<button class="btn small tinted" type="button" data-act="transferir">${IC.flechas.replace('<svg', '<svg style="width:18px;height:18px"')}Transferir</button>` : ''}${btnMas('nueva-cuenta', 'Nueva cuenta')}`);
     if (!S.cuentas.length) return html + `<div class="empty"><strong>Agrega tus cuentas</strong>Tu cuenta de cheques, de ahorro, el efectivo y tus tarjetas de crédito. Así sabes cuánto tienes y cuánto debes.<button class="btn small" type="button" data-act="nueva-cuenta">Agregar cuenta</button></div>`;
     const deudas = -pat.tarj + pat.prest;
-    html += `<div class="stats"><div class="stat"><p class="k">Patrimonio neto</p><p class="v ${pat.neto < -0.005 ? 'neg' : ''}">${money(pat.neto)}</p></div><div class="stat"><p class="k">Tienes</p><p class="v">${money(pat.efectivo + pat.inv)}</p></div><div class="stat"><p class="k">Debes</p><p class="v ${deudas > 0.005 ? 'neg' : ''}">${money(deudas)}</p><p class="s">Tarjetas y préstamos</p></div></div>`;
-    const grupos = [['Bancos y efectivo', ['cheques', 'ahorro', 'efectivo']], ['Inversiones', ['inversion']], ['Tarjetas de crédito', ['tarjeta']]];
+    html += `<div class="stats"><div class="stat"><p class="k">Patrimonio neto</p><p class="v ${pat.neto < -0.005 ? 'neg' : ''}">${money(pat.neto)}</p></div><div class="stat"><p class="k">Tienes</p><p class="v">${money(pat.efectivo + pat.inv + pat.ret)}</p>${pat.ret ? `<p class="s">Incluye ${money(pat.ret)} de retiro</p>` : ''}</div><div class="stat"><p class="k">Debes</p><p class="v ${deudas > 0.005 ? 'neg' : ''}">${money(deudas)}</p><p class="s">Tarjetas y préstamos</p></div></div>`;
+    const grupos = [['Bancos y efectivo', ['cheques', 'ahorro', 'efectivo']], ['Inversiones', ['inversion']], ['Retiro', ['retiro']], ['Tarjetas de crédito', ['tarjeta']]];
     grupos.forEach(([titulo, tipos]) => {
       const cs = S.cuentas.filter((c) => tipos.includes(c.tipo));
       if (!cs.length) return;
@@ -1171,6 +1174,12 @@
   }
   function filaCuenta(c, v) {
     const t = TIPOS_CUENTA[c.tipo];
+    if (c.tipo === 'retiro') {
+      const h = c.historial, u = h[h.length - 1], a = h[h.length - 2];
+      const dif = u && a ? u.v - a.v : 0;
+      const sub = u ? `Actualizado ${fCorta(u.f)}${a && Math.abs(dif) > 0.005 ? ` · ${dif > 0 ? 'subió' : 'bajó'} ${moneyAbs(dif)}` : ''}` : 'Toca para actualizar el saldo';
+      return `<button class="row" type="button" data-act="editar-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2">${sub}</span></span><span class="amt">${money(v)}</span></button>`;
+    }
     const pend = S.movimientos.filter((x) => !x.posteado && (x.cuentaId === c.id || x.cuentaDestinoId === c.id)).length;
     const pendTxt = pend ? ` · ${pend} ${pend === 1 ? 'pendiente' : 'pendientes'}` : '';
     if (c.tipo === 'tarjeta') {
@@ -1280,7 +1289,7 @@
 
   // ================= Hojas =================
   let alCerrar = null;
-  function abrirSheet(html) { const b = $('#sheet-box'); b.innerHTML = html; $('#sheet').hidden = false; b.scrollTop = 0; setTimeout(() => { const f = b.querySelector('[autofocus]'); if (f && window.matchMedia('(pointer: fine)').matches) f.focus(); }, 60); return b; }
+  function abrirSheet(html) { const b = $('#sheet-box'); b.innerHTML = html; $('#sheet').hidden = false; b.scrollTop = 0; setTimeout(() => { const f = b.querySelector('[autofocus]'); if (f && window.matchMedia('(pointer: fine)').matches && !b.contains(document.activeElement)) f.focus(); }, 60); return b; }
   function cerrarSheet() { $('#sheet').hidden = true; $('#sheet-box').innerHTML = ''; if ($('#lock').hidden) padActivo = null; if (alCerrar) { const f = alCerrar; alCerrar = null; f(); } }
   const cabeza = (titulo, guardar = true) => `<div class="sheet-head"><button class="link" type="button" data-act="cerrar-sheet">${guardar ? 'Cancelar' : 'Cerrar'}</button><h2>${esc(titulo)}</h2>${guardar ? '<button class="link strong" type="submit">Guardar</button>' : '<span></span>'}</div>`;
   const opsColor = (sel) => `<div class="colors">${PALETA.map((c) => `<label style="--c:var(--c-${c})"><input type="radio" name="color" value="${c}" ${sel === c ? 'checked' : ''} aria-label="${c}"></label>`).join('')}</div>`;
@@ -1297,17 +1306,18 @@
 
   // ----- Movimiento -----
   function sheetMov(id, tipoIni, preset = {}) {
-    if (!S.cuentas.length) {
+    const CM = S.cuentas.filter((c) => c.tipo !== 'retiro');
+    if (!CM.length) {
       abrirSheet(`${cabeza('Nuevo movimiento', false)}<div class="empty" style="background:var(--sheet-card)"><strong>Primero agrega una cuenta</strong>Por ejemplo tu cuenta de cheques, el efectivo o tu tarjeta de crédito.<button class="btn small" type="button" data-act="nueva-cuenta">Agregar cuenta</button></div>`);
       return;
     }
     const x = id ? S.movimientos.find((m) => m.id === id) : null;
     let tipo = x ? x.tipo : (['gasto', 'ingreso', 'transferencia'].includes(tipoIni) ? tipoIni : 'gasto');
-    const opsCuenta = (sel) => S.cuentas.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
-    const noTarj = S.cuentas.find((c) => c.tipo === 'cheques') || S.cuentas.find((c) => c.tipo !== 'tarjeta') || S.cuentas[0];
+    const opsCuenta = (sel) => CM.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
+    const noTarj = CM.find((c) => c.tipo === 'cheques') || CM.find((c) => c.tipo !== 'tarjeta') || CM[0];
     let cuentaIni = x ? x.cuentaId : (preset.desde && cuenta(preset.desde) ? preset.desde : (filtro.cuenta && cuenta(filtro.cuenta) ? filtro.cuenta : noTarj.id));
-    if (!x && preset.hacia && cuentaIni === preset.hacia) cuentaIni = (S.cuentas.find((c) => c.id !== preset.hacia && c.tipo !== 'tarjeta') || S.cuentas.find((c) => c.id !== preset.hacia) || noTarj).id;
-    const destIni = x && x.cuentaDestinoId ? x.cuentaDestinoId : (preset.hacia && cuenta(preset.hacia) ? preset.hacia : (S.cuentas.find((c) => c.id !== cuentaIni && c.tipo === 'tarjeta') || S.cuentas.find((c) => c.id !== cuentaIni) || S.cuentas[0]).id);
+    if (!x && preset.hacia && cuentaIni === preset.hacia) cuentaIni = (CM.find((c) => c.id !== preset.hacia && c.tipo !== 'tarjeta') || CM.find((c) => c.id !== preset.hacia) || noTarj).id;
+    const destIni = x && x.cuentaDestinoId ? x.cuentaDestinoId : (preset.hacia && cuenta(preset.hacia) ? preset.hacia : (CM.find((c) => c.id !== cuentaIni && c.tipo === 'tarjeta') || CM.find((c) => c.id !== cuentaIni) || CM[0]).id);
     const notaIni = x ? x.nota : (preset.hacia && cuenta(preset.hacia) && cuenta(preset.hacia).tipo === 'tarjeta' ? 'Pago de ' + cuenta(preset.hacia).nombre : '');
     const b = abrirSheet(`<form id="form-mov" novalidate>${cabeza(x ? 'Editar movimiento' : 'Nuevo movimiento')}
       <div style="display:grid; gap:18px">
@@ -1337,7 +1347,7 @@
       const lista = S.categorias.filter((c) => c.tipo === tc);
       $('#m-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('') + '<option value="__nueva">+ Nueva categoría…</option>';
       $('#m-cat', b).value = lista.some((c) => c.id === sel) ? sel : (lista[0] ? lista[0].id : '');
-      $('#m-hint', b).textContent = tipo !== 'transferencia' ? '' : S.cuentas.length < 2 ? 'Para transferir necesitas al menos dos cuentas. Agrega otra en Cuentas.' : 'El dinero sale de una cuenta y entra a la otra, así que no cuenta como gasto ni como ingreso. Úsalo para pagar tu tarjeta o mover dinero a tu ahorro.';
+      $('#m-hint', b).textContent = tipo !== 'transferencia' ? '' : CM.length < 2 ? 'Para transferir necesitas al menos dos cuentas. Agrega otra en Cuentas.' : 'El dinero sale de una cuenta y entra a la otra, así que no cuenta como gasto ni como ingreso. Úsalo para pagar tu tarjeta o mover dinero a tu ahorro.';
     };
     pintar();
     b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
@@ -1415,12 +1425,13 @@
     </div>`);
   }
   function sheetRec(id) {
-    if (!S.cuentas.length) { sheetMov(null); return; }
+    const CM = S.cuentas.filter((c) => c.tipo !== 'retiro');
+    if (!CM.length) { sheetMov(null); return; }
     const r = id ? S.recurrentes.find((x) => x.id === id) : null;
     let tipo = r ? r.tipo : 'gasto';
-    const ops = (sel) => S.cuentas.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
-    const c0 = r ? r.cuentaId : (S.cuentas.find((c) => c.tipo === 'cheques') || S.cuentas[0]).id;
-    const d0 = r && r.cuentaDestinoId ? r.cuentaDestinoId : (S.cuentas.find((c) => c.id !== c0 && c.tipo === 'tarjeta') || S.cuentas.find((c) => c.id !== c0) || S.cuentas[0]).id;
+    const ops = (sel) => CM.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
+    const c0 = r ? r.cuentaId : (CM.find((c) => c.tipo === 'cheques') || CM[0]).id;
+    const d0 = r && r.cuentaDestinoId ? r.cuentaDestinoId : (CM.find((c) => c.id !== c0 && c.tipo === 'tarjeta') || CM.find((c) => c.id !== c0) || CM[0]).id;
     const b = abrirSheet(`<form id="form-rec" novalidate>${cabeza(r ? 'Editar programado' : 'Programar movimiento')}<div style="display:grid; gap:18px">
       <div class="seg" role="group" aria-label="Tipo"><button type="button" data-tipo="gasto">Pago</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferencia</button></div>
       <div class="monto"><span>$</span><input id="r-monto" class="money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${r ? fmtNum(r.monto) : ''}" autofocus></div>
@@ -1482,22 +1493,25 @@
     const c = id ? cuenta(id) : null, sal = saldos();
     const actual = c ? sal[c.id] : 0;
     const efecto = c ? actual - c.saldoInicial : 0;
-    const b = abrirSheet(`<form id="form-cta" novalidate>${cabeza(c ? 'Editar cuenta' : 'Nueva cuenta')}<div style="display:grid; gap:18px">
+    const esRet = c && c.tipo === 'retiro';
+    const b = abrirSheet(`<form id="form-cta" novalidate>${cabeza(c ? (esRet ? 'Actualizar saldo' : 'Editar cuenta') : 'Nueva cuenta')}<div style="display:grid; gap:18px">
       <div class="group">
-        <div class="frow"><label for="a-nombre">Nombre</label><input id="a-nombre" type="text" placeholder="Ej. Chase cheques" value="${c ? esc(c.nombre) : ''}" autocomplete="off" autofocus></div>
+        <div class="frow"><label for="a-nombre">Nombre</label><input id="a-nombre" type="text" placeholder="Ej. Chase cheques" value="${c ? esc(c.nombre) : ''}" autocomplete="off" ${esRet ? '' : 'autofocus'}></div>
         <div class="frow"><label for="a-tipo">Tipo</label><select id="a-tipo">${Object.entries(TIPOS_CUENTA).map(([k, t]) => `<option value="${k}" ${(c ? c.tipo : 'cheques') === k ? 'selected' : ''}>${t.n}</option>`).join('')}</select></div>
-        <div class="frow"><label for="a-saldo" id="l-saldo">Saldo actual</label><input id="a-saldo" class="money signed" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
+        <div class="frow"><label for="a-saldo" id="l-saldo">Saldo actual</label><input id="a-saldo" class="money signed" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" ${esRet ? 'autofocus' : ''}></div>
         <div class="frow" id="row-lim"><label for="a-lim">Límite de crédito</label><input id="a-lim" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${c && c.limite ? fmtNum(c.limite) : ''}"></div>
       </div>
       <p class="note" id="a-hint"></p>
       <p class="form-error" id="a-error" role="alert"></p>
-      ${c ? `<div class="sheet-actions">${S.cuentas.length > 1 ? (c.tipo === 'tarjeta' ? `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}">Pagar esta tarjeta</button>` : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
+      ${esRet && c.historial.length ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Últimas actualizaciones</p><div class="group">${c.historial.slice(-6).reverse().map((h, i, arr) => { const prev = arr[i + 1]; const d = prev ? h.v - prev.v : 0; return `<div class="row plain" style="cursor:default; min-height:48px"><span class="rt"><span class="t1">${esc(cap(parseISO(h.f).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })))}</span></span><span class="amt">${money(h.v)}${prev && Math.abs(d) > 0.005 ? `<small class="${d > 0 ? 'pos' : 'neg'}">${d > 0 ? '+' : '−'}${moneyAbs(d)}</small>` : ''}</span></div>`; }).join('')}</div></div>` : ''}
+      ${esRet ? '<div class="sheet-actions"><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>' : ''}
+      ${c && !esRet ? `<div class="sheet-actions">${S.cuentas.filter((x) => x.tipo !== 'retiro').length > 1 ? (c.tipo === 'tarjeta' ? `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}">Pagar esta tarjeta</button>` : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
     </div></form>`);
     const pintar = () => {
-      const esT = $('#a-tipo', b).value === 'tarjeta';
+      const esT = $('#a-tipo', b).value === 'tarjeta', esR = $('#a-tipo', b).value === 'retiro';
       $('#row-lim', b).hidden = !esT;
       $('#l-saldo', b).textContent = esT ? 'Deuda actual' : 'Saldo actual';
-      $('#a-hint', b).textContent = esT ? 'Escribe lo que debes hoy en la tarjeta. Los gastos con tarjeta suben la deuda y los pagos (transferencias) la bajan.' : 'Escribe lo que tienes hoy en la cuenta. Si después no coincide con tu banco, aquí lo corriges.';
+      $('#a-hint', b).textContent = esR ? 'Cuando revises tu cuenta de retiro, escribe aquí el saldo nuevo. No lleva movimientos diarios; el saldo se suma a lo que tienes y a tu patrimonio.' : esT ? 'Escribe lo que debes hoy en la tarjeta. Los gastos con tarjeta suben la deuda y los pagos (transferencias) la bajan.' : 'Escribe lo que tienes hoy en la cuenta. Si después no coincide con tu banco, aquí lo corriges.';
     };
     const valIni = c ? (c.tipo === 'tarjeta' ? -actual : actual) : 0;
     $('#a-saldo', b).value = c ? fmtNum(valIni) : '';
@@ -1511,12 +1525,16 @@
       if (isNaN(v)) { $('#a-error', b).textContent = 'Revisa el saldo: solo números.'; return; }
       const deseado = tipo === 'tarjeta' ? -v : v;
       const lim = tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-lim', b).value) || 0) : 0;
-      if (c) { Object.assign(c, { nombre, tipo, limite: lim, saldoInicial: deseado - efecto }); }
-      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, creado: new Date().toISOString() });
-      guardar(); cerrarSheet(); toast(c ? 'Cuenta actualizada' : 'Cuenta agregada'); render();
+      const hist = c ? c.historial.slice() : [];
+      if (tipo === 'retiro' && (!hist.length || Math.abs(hist[hist.length - 1].v - deseado) > 0.004)) {
+        if (hist.length && hist[hist.length - 1].f === hoyISO()) hist[hist.length - 1].v = deseado; else hist.push({ f: hoyISO(), v: deseado });
+      }
+      if (c) { Object.assign(c, { nombre, tipo, limite: lim, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
+      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, creado: new Date().toISOString(), historial: hist });
+      guardar(); cerrarSheet(); toast(c ? (tipo === 'retiro' ? 'Saldo actualizado' : 'Cuenta actualizada') : 'Cuenta agregada'); render();
     });
     if (c) {
-      $('#a-ver', b).addEventListener('click', () => { filtro.cuenta = c.id; filtro.cat = ''; filtro.q = ''; cerrarSheet(); ir('movimientos'); });
+      if ($('#a-ver', b)) $('#a-ver', b).addEventListener('click', () => { filtro.cuenta = c.id; filtro.cat = ''; filtro.q = ''; cerrarSheet(); ir('movimientos'); });
       $('#a-borrar', b).addEventListener('click', async () => {
         const n = S.movimientos.filter((m) => m.cuentaId === c.id || m.cuentaDestinoId === c.id).length;
         if (!(await confirmar('¿Eliminar cuenta?', n ? `También se borrarán sus ${n} movimientos.` : 'La cuenta no tiene movimientos.'))) return;
@@ -1922,6 +1940,34 @@
     t.value = (neg ? '-' : '') + fmtNum(parseInt(dig, 10) / 100);
     try { t.setSelectionRange(t.value.length, t.value.length); } catch (er) {}
   });
+  // Cada dígito entra por la derecha sin importar dónde esté el cursor; borrar quita el último
+  document.addEventListener('beforeinput', (e) => {
+    const t = e.target;
+    if (!(t.matches && t.matches('input.money'))) return;
+    const it = e.inputType || '';
+    const firma = t.classList.contains('signed');
+    let neg = firma && t.value.includes('-');
+    let dig = t.value.replace(/\D/g, '').replace(/^0+/, '');
+    const todo = t.value.length > 0 && t.selectionStart === 0 && t.selectionEnd === t.value.length;
+    if (it === 'insertText' || it === 'insertReplacementText' || it === 'insertCompositionText') {
+      const d = e.data || '';
+      e.preventDefault();
+      if (firma && d.includes('-')) neg = !neg;
+      const nd = d.replace(/\D/g, '');
+      if (todo) { dig = ''; if (!d.includes('-')) neg = false; }
+      dig = (dig + nd).replace(/^0+/, '').slice(0, 11);
+    } else if (it.startsWith('delete')) {
+      e.preventDefault();
+      if (todo) { dig = ''; neg = false; } else if (dig) dig = dig.slice(0, -1); else neg = false;
+    } else return;
+    t.value = dig ? (neg ? '-' : '') + fmtNum(parseInt(dig, 10) / 100) : (neg ? '-' : '');
+    try { t.setSelectionRange(t.value.length, t.value.length); } catch (er) {}
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  document.addEventListener('pointerup', (e) => {
+    const t = e.target;
+    if (t.matches && t.matches('input.money')) setTimeout(() => { try { if (t.selectionStart === t.selectionEnd) t.setSelectionRange(t.value.length, t.value.length); } catch (er) {} }, 0);
+  });
   document.addEventListener('paste', (e) => {
     const t = e.target;
     if (!(t.matches && t.matches('input.money'))) return;
@@ -1933,7 +1979,7 @@
   });
   document.addEventListener('focusin', (e) => {
     const t = e.target;
-    if (t.matches && t.matches('input.money')) setTimeout(() => { try { t.setSelectionRange(t.value.length, t.value.length); } catch (er) {} }, 0);
+    if (t.matches && t.matches('input.money')) setTimeout(() => { try { if (document.activeElement === t && t.selectionStart === t.selectionEnd) t.setSelectionRange(t.value.length, t.value.length); } catch (er) {} }, 0);
   });
   document.addEventListener('focusout', (e) => {
     const t = e.target;
