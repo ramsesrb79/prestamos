@@ -1097,7 +1097,7 @@
     const porGrupo = (g) => suma(gastos.filter((c) => c.grupo === g).map(presDe));
     const nec = porGrupo('necesidades'), gus = porGrupo('gustos'), deu = porGrupo('deuda');
     const asignado = nec + gus + deu + pa.plan, libre = ing - asignado;
-    let html = encabezado('Presupuesto', '', `<button class="btn small tinted" type="button" data-act="config-pres">Ingreso y ahorro</button>`) + mnav('mes-pres', ym);
+    let html = encabezado('Presupuesto', '', `<button class="btn small tinted" type="button" data-act="categorias">Categorías</button><button class="btn small tinted" type="button" data-act="config-pres">Ingreso y ahorro</button>`) + mnav('mes-pres', ym);
 
     if (ym === ymHoy()) {
       const d = disponible(ym);
@@ -1327,20 +1327,21 @@
       <p class="form-error" id="m-error" role="alert"></p>
       ${x ? '<button class="btn block destructive" type="button" id="m-borrar">Eliminar movimiento</button>' : ''}
       </div></form>`);
-    const pintar = () => {
+    const pintar = (forzar) => {
       b.querySelectorAll('.seg button').forEach((bt) => bt.classList.toggle('on', bt.dataset.tipo === tipo));
       $('#row-dest', b).hidden = tipo !== 'transferencia';
       $('#row-cat', b).hidden = tipo === 'transferencia';
       $('#l-cuenta', b).textContent = tipo === 'transferencia' ? 'Desde' : tipo === 'ingreso' ? 'A la cuenta' : 'Pagado con';
       const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto';
-      const sel = x && x.tipo === tipo ? x.categoriaId : $('#m-cat', b).value;
+      const sel = forzar || (x && x.tipo === tipo ? x.categoriaId : $('#m-cat', b).value);
       const lista = S.categorias.filter((c) => c.tipo === tc);
-      $('#m-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
+      $('#m-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('') + '<option value="__nueva">+ Nueva categoría…</option>';
       $('#m-cat', b).value = lista.some((c) => c.id === sel) ? sel : (lista[0] ? lista[0].id : '');
       $('#m-hint', b).textContent = tipo !== 'transferencia' ? '' : S.cuentas.length < 2 ? 'Para transferir necesitas al menos dos cuentas. Agrega otra en Cuentas.' : 'El dinero sale de una cuenta y entra a la otra, así que no cuenta como gasto ni como ingreso. Úsalo para pagar tu tarjeta o mover dinero a tu ahorro.';
     };
     pintar();
     b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
+    conCatNueva(b, '#m-cat', () => tipo, pintar);
     $('#form-mov', b).addEventListener('submit', (e) => {
       e.preventDefault();
       const monto = parseMonto($('#m-monto', b).value), cId = $('#m-cuenta', b).value, dId = $('#m-dest', b).value, fecha = $('#m-fecha', b).value;
@@ -1362,6 +1363,46 @@
       if (!(await confirmar('¿Eliminar movimiento?', 'Se quita de tus cuentas y de tu presupuesto.'))) return;
       S.movimientos = S.movimientos.filter((m) => m.id !== x.id); guardar(); cerrarSheet(); toast('Movimiento eliminado'); render();
     });
+  }
+
+  // Crear una categoría sin salir del formulario
+  function conCatNueva(b, selId, tipoFn, pintar) {
+    const sel = $(selId, b);
+    const row = document.createElement('div');
+    row.className = 'frow'; row.hidden = true;
+    row.innerHTML = `<input type="text" class="nc-in" placeholder="Nombre de la nueva categoría" autocomplete="off" aria-label="Nombre de la nueva categoría" style="text-align:left"><button type="button" class="btn small nc-ok">Crear</button>`;
+    sel.closest('.frow').after(row);
+    let prev = sel.value;
+    sel.addEventListener('focus', () => { prev = sel.value; });
+    sel.addEventListener('change', () => {
+      if (sel.value === '__nueva') { sel.value = prev; row.hidden = false; row.querySelector('input').focus(); }
+      else prev = sel.value;
+    });
+    const crear = () => {
+      const inp = row.querySelector('input'), n = inp.value.trim();
+      if (!n) { inp.focus(); return; }
+      const tc = tipoFn() === 'ingreso' ? 'ingreso' : 'gasto';
+      const existe = S.categorias.find((c) => c.tipo === tc && c.nombre.toLowerCase() === n.toLowerCase());
+      const c = existe || { id: nuevoId('c'), nombre: n, tipo: tc, grupo: tc === 'ingreso' ? 'ingreso' : 'gustos', color: PALETA[S.categorias.length % PALETA.length], presupuesto: 0, sistema: false };
+      if (!existe) { S.categorias.push(c); guardar(); }
+      row.hidden = true; inp.value = '';
+      pintar(c.id); prev = c.id;
+      toast(existe ? `Ya tenías «${c.nombre}»` : `Categoría «${n}» creada`);
+    };
+    row.querySelector('.nc-ok').addEventListener('click', crear);
+    row.querySelector('input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); crear(); } });
+  }
+  function sheetCategorias() {
+    const grupo = (titulo, lista) => lista.length ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">${titulo}</p><div class="group">${lista.map((c) => `<button class="row" type="button" data-act="editar-cat" data-id="${c.id}">${icCat(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2">${c.id === CAT_PREST ? 'Automática con tus préstamos' : c.tipo === 'ingreso' ? 'Ingreso' : c.presupuesto > 0 ? 'Límite ' + money(c.presupuesto) + ' al mes' : 'Sin límite'}</span></span><span class="amt" style="color:var(--label-3)">${IC.der.replace('<svg', '<svg style="width:16px;height:16px"')}</span></button>`).join('')}</div></div>` : '';
+    const g = S.categorias.filter((c) => c.tipo === 'gasto'), i = S.categorias.filter((c) => c.tipo === 'ingreso');
+    abrirSheet(`${cabeza('Categorías', false)}<div style="display:grid; gap:18px">
+      <div class="sheet-actions" style="grid-template-columns:1fr 1fr"><button class="btn small" type="button" data-act="nueva-cat">+ De gasto</button><button class="btn small tinted" type="button" data-act="nueva-cat" data-tipo="ingreso">+ De ingreso</button></div>
+      ${grupo('Gastos · Necesidades', g.filter((c) => c.grupo === 'necesidades'))}
+      ${grupo('Gastos · Gustos', g.filter((c) => c.grupo === 'gustos'))}
+      ${grupo('Gastos · Deudas', g.filter((c) => c.grupo === 'deuda'))}
+      ${grupo('Ingresos', i)}
+      <p class="note" style="margin-top:0">Toca una categoría para cambiar su nombre, color o límite al mes, o para eliminarla.</p>
+    </div>`);
   }
 
   // ----- Programados -----
@@ -1399,13 +1440,13 @@
       <p class="form-error" id="r-error" role="alert"></p>
       ${r ? '<button class="btn block destructive" type="button" id="r-borrar">Eliminar programación</button>' : ''}
     </div></form>`);
-    const pintar = () => {
+    const pintar = (forzar) => {
       b.querySelectorAll('.seg button').forEach((bt) => bt.classList.toggle('on', bt.dataset.tipo === tipo));
       $('#rr-dest', b).hidden = tipo !== 'transferencia';
       $('#rr-cat', b).hidden = tipo === 'transferencia';
       $('#rl-cuenta', b).textContent = tipo === 'transferencia' ? 'Desde' : tipo === 'ingreso' ? 'A la cuenta' : 'Pagado con';
-      const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto', sel = r && r.tipo === tipo ? r.categoriaId : $('#r-cat', b).value, lista = S.categorias.filter((c) => c.tipo === tc);
-      $('#r-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
+      const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto', sel = forzar || (r && r.tipo === tipo ? r.categoriaId : $('#r-cat', b).value), lista = S.categorias.filter((c) => c.tipo === tc);
+      $('#r-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('') + '<option value="__nueva">+ Nueva categoría…</option>';
       $('#r-cat', b).value = lista.some((c) => c.id === sel) ? sel : (lista[0] ? lista[0].id : '');
       const ini = $('#r-ini', b).value, auto = $('#r-auto', b).checked;
       const atras = !r && ini && ini < hoyISO();
@@ -1413,7 +1454,8 @@
     };
     pintar();
     b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
-    ['#r-ini', '#r-auto'].forEach((q) => $(q, b).addEventListener('change', pintar));
+    ['#r-ini', '#r-auto'].forEach((q) => $(q, b).addEventListener('change', () => pintar()));
+    conCatNueva(b, '#r-cat', () => tipo, pintar);
     $('#form-rec', b).addEventListener('submit', (e) => {
       e.preventDefault();
       const monto = parseMonto($('#r-monto', b).value), cId = $('#r-cuenta', b).value, dId = $('#r-dest', b).value, ini = $('#r-ini', b).value, fin = $('#r-fin', b).value;
@@ -1830,7 +1872,7 @@
     'nueva-cuenta': () => sheetCuenta(null), 'editar-cuenta': (t) => sheetCuenta(t.dataset.id),
     'nueva-cat': (t) => sheetCat(null, t.dataset.tipo), 'editar-cat': (t) => sheetCat(t.dataset.id),
     'nueva-meta': () => sheetMeta(null), 'editar-meta': (t) => sheetMeta(t.dataset.id),
-    'config-pres': () => sheetConfig(), 'ajustes': () => sheetAjustes(),
+    'config-pres': () => sheetConfig(), 'ajustes': () => sheetAjustes(), 'categorias': () => sheetCategorias(),
     'mes-mov': (t) => { mesMov = addMes(mesMov, +t.dataset.d); render(); },
     'mes-pres': (t) => { mesPres = addMes(mesPres, +t.dataset.d); render(); },
     'limpiar-filtros': () => { filtro.cuenta = ''; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; render(); },
