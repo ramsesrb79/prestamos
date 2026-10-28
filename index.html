@@ -780,7 +780,7 @@
   // ================= Vista: Cuentas =================
   function vCuentas() {
     const sal = saldos(), pat = patrimonio(sal);
-    let html = encabezado('Cuentas', '', btnMas('nueva-cuenta', 'Nueva cuenta'));
+    let html = encabezado('Cuentas', '', `${S.cuentas.length > 1 ? `<button class="btn small tinted" type="button" data-act="transferir">${IC.flechas.replace('<svg', '<svg style="width:18px;height:18px"')}Transferir</button>` : ''}${btnMas('nueva-cuenta', 'Nueva cuenta')}`);
     if (!S.cuentas.length) return html + `<div class="empty"><strong>Agrega tus cuentas</strong>Tu cuenta de cheques, de ahorro, el efectivo y tus tarjetas de crédito. Así sabes cuánto tienes y cuánto debes.<button class="btn small" type="button" data-act="nueva-cuenta">Agregar cuenta</button></div>`;
     const deudas = -pat.tarj + pat.prest;
     html += `<div class="stats"><div class="stat"><p class="k">Patrimonio neto</p><p class="v ${pat.neto < -0.005 ? 'neg' : ''}">${money(pat.neto)}</p></div><div class="stat"><p class="k">Tienes</p><p class="v">${money(pat.efectivo + pat.inv)}</p></div><div class="stat"><p class="k">Debes</p><p class="v ${deudas > 0.005 ? 'neg' : ''}">${money(deudas)}</p><p class="s">Tarjetas y préstamos</p></div></div>`;
@@ -791,7 +791,7 @@
       const tot = suma(cs.map((c) => sal[c.id]));
       html += `<section class="section"><div class="sh"><h2>${titulo}</h2><span class="muted" style="font-size:15px">${tipos[0] === 'tarjeta' ? 'Debes ' + moneyAbs(Math.min(0, tot)) : money(tot)}</span></div><div class="group">${cs.map((c) => filaCuenta(c, sal[c.id])).join('')}</div></section>`;
     });
-    html += `<p class="note">Para pagar una tarjeta, registra una <b>transferencia</b> de tu cuenta de cheques a la tarjeta. Así no se cuenta dos veces como gasto.</p>`;
+    html += `<p class="note">Para pagar una tarjeta, toca la tarjeta y luego <b>Pagar esta tarjeta</b>, o usa <b>Transferir</b>. El pago baja tu cuenta de cheques y tu deuda al mismo tiempo, sin contarse como gasto otra vez.</p>`;
     return html;
   }
   function filaCuenta(c, v) {
@@ -918,7 +918,7 @@
   $('#c-no').addEventListener('click', () => cerrarC(false));
 
   // ----- Movimiento -----
-  function sheetMov(id, tipoIni) {
+  function sheetMov(id, tipoIni, preset = {}) {
     if (!S.cuentas.length) {
       abrirSheet(`${cabeza('Nuevo movimiento', false)}<div class="empty" style="background:var(--sheet-card)"><strong>Primero agrega una cuenta</strong>Por ejemplo tu cuenta de cheques, el efectivo o tu tarjeta de crédito.<button class="btn small" type="button" data-act="nueva-cuenta">Agregar cuenta</button></div>`);
       return;
@@ -926,8 +926,11 @@
     const x = id ? S.movimientos.find((m) => m.id === id) : null;
     let tipo = x ? x.tipo : (['gasto', 'ingreso', 'transferencia'].includes(tipoIni) ? tipoIni : 'gasto');
     const opsCuenta = (sel) => S.cuentas.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
-    const cuentaIni = x ? x.cuentaId : (filtro.cuenta && cuenta(filtro.cuenta) ? filtro.cuenta : (S.cuentas.find((c) => c.tipo === 'cheques') || S.cuentas[0]).id);
-    const destIni = x && x.cuentaDestinoId ? x.cuentaDestinoId : (S.cuentas.find((c) => c.id !== cuentaIni) || S.cuentas[0]).id;
+    const noTarj = S.cuentas.find((c) => c.tipo === 'cheques') || S.cuentas.find((c) => c.tipo !== 'tarjeta') || S.cuentas[0];
+    let cuentaIni = x ? x.cuentaId : (preset.desde && cuenta(preset.desde) ? preset.desde : (filtro.cuenta && cuenta(filtro.cuenta) ? filtro.cuenta : noTarj.id));
+    if (!x && preset.hacia && cuentaIni === preset.hacia) cuentaIni = (S.cuentas.find((c) => c.id !== preset.hacia && c.tipo !== 'tarjeta') || S.cuentas.find((c) => c.id !== preset.hacia) || noTarj).id;
+    const destIni = x && x.cuentaDestinoId ? x.cuentaDestinoId : (preset.hacia && cuenta(preset.hacia) ? preset.hacia : (S.cuentas.find((c) => c.id !== cuentaIni && c.tipo === 'tarjeta') || S.cuentas.find((c) => c.id !== cuentaIni) || S.cuentas[0]).id);
+    const notaIni = x ? x.nota : (preset.hacia && cuenta(preset.hacia) && cuenta(preset.hacia).tipo === 'tarjeta' ? 'Pago de ' + cuenta(preset.hacia).nombre : '');
     const b = abrirSheet(`<form id="form-mov" novalidate>${cabeza(x ? 'Editar movimiento' : 'Nuevo movimiento')}
       <div style="display:grid; gap:18px">
       <div class="seg" role="group" aria-label="Tipo de movimiento"><button type="button" data-tipo="gasto">Gasto</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferencia</button></div>
@@ -937,7 +940,7 @@
         <div class="frow" id="row-dest"><label for="m-dest">Hacia</label><select id="m-dest">${opsCuenta(destIni)}</select></div>
         <div class="frow" id="row-cat"><label for="m-cat">Categoría</label><select id="m-cat"></select></div>
         <div class="frow"><label for="m-fecha">Fecha</label><input id="m-fecha" type="date" value="${x ? x.fecha : hoyISO()}"></div>
-        <div class="frow"><label for="m-nota">Nota</label><input id="m-nota" type="text" placeholder="Opcional" value="${x ? esc(x.nota) : ''}" autocomplete="off"></div>
+        <div class="frow"><label for="m-nota">Nota</label><input id="m-nota" type="text" placeholder="Opcional" value="${esc(notaIni)}" autocomplete="off"></div>
       </div>
       <p class="note" id="m-hint" style="margin-top:-8px"></p>
       <p class="form-error" id="m-error" role="alert"></p>
@@ -953,7 +956,7 @@
       const lista = S.categorias.filter((c) => c.tipo === tc);
       $('#m-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
       $('#m-cat', b).value = lista.some((c) => c.id === sel) ? sel : (lista[0] ? lista[0].id : '');
-      $('#m-hint', b).textContent = tipo === 'transferencia' ? 'Usa transferencia para pagar tu tarjeta de crédito o mover dinero entre tus cuentas. No cuenta como gasto.' : '';
+      $('#m-hint', b).textContent = tipo !== 'transferencia' ? '' : S.cuentas.length < 2 ? 'Para transferir necesitas al menos dos cuentas. Agrega otra en Cuentas.' : 'El dinero sale de una cuenta y entra a la otra, así que no cuenta como gasto ni como ingreso. Úsalo para pagar tu tarjeta o mover dinero a tu ahorro.';
     };
     pintar();
     b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
@@ -991,7 +994,7 @@
       </div>
       <p class="note" id="a-hint"></p>
       <p class="form-error" id="a-error" role="alert"></p>
-      ${c ? `<div class="sheet-actions"><button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
+      ${c ? `<div class="sheet-actions">${S.cuentas.length > 1 ? (c.tipo === 'tarjeta' ? `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}">Pagar esta tarjeta</button>` : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
     </div></form>`);
     const pintar = () => {
       const esT = $('#a-tipo', b).value === 'tarjeta';
@@ -1241,7 +1244,8 @@
   // ================= Eventos =================
   const ACC = {
     'tab': (t) => ir(t.dataset.v),
-    'nuevo-mov': (t) => sheetMov(null, t.dataset.tipo), 'editar-mov': (t) => sheetMov(t.dataset.id),
+    'nuevo-mov': (t) => sheetMov(null, t.dataset.tipo),
+    'transferir': (t) => sheetMov(null, 'transferencia', { desde: t.dataset.desde, hacia: t.dataset.hacia }), 'editar-mov': (t) => sheetMov(t.dataset.id),
     'nueva-cuenta': () => sheetCuenta(null), 'editar-cuenta': (t) => sheetCuenta(t.dataset.id),
     'nueva-cat': (t) => sheetCat(null, t.dataset.tipo), 'editar-cat': (t) => sheetCat(t.dataset.id),
     'nueva-meta': () => sheetMeta(null), 'editar-meta': (t) => sheetMeta(t.dataset.id),
