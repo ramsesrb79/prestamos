@@ -341,6 +341,7 @@
   const z = (v) => (Math.abs(v) < 0.005 ? 0 : v);
   const money = (v) => cur.format(z(v || 0));
   const moneyAbs = (v) => cur.format(Math.abs(z(v || 0)));
+  const menos = (v) => (Math.abs(v) > 0.005 ? '−' + moneyAbs(v) : money(0));
   const compact = (v) => { const a = Math.abs(v), s = v < 0 ? '-' : ''; if (a >= 1e6) return s + '$' + (a / 1e6).toFixed(1).replace(/\.0$/, '') + 'M'; if (a >= 1e3) return s + '$' + (a / 1e3).toFixed(1).replace(/\.0$/, '') + 'k'; return s + '$' + Math.round(a); };
   const fmtNum = (v) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const parseMonto = (s) => { const n = parseFloat(String(s == null ? '' : s).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? NaN : n; };
@@ -550,15 +551,27 @@
   function mesesHasta(iso) { const h = new Date(), d = parseISO(iso); return (d.getFullYear() - h.getFullYear()) * 12 + (d.getMonth() - h.getMonth()) + 1; }
   function mensualMeta(mt) { const falta = Math.max(0, mt.objetivo - mt.ahorrado); if (!falta) return 0; if (!mt.fecha) return null; return falta / Math.max(1, mesesHasta(mt.fecha)); }
   function planAhorro() { const metas = suma(S.metas.map((m) => mensualMeta(m) || 0)); const manual = S.config.ahorroMensual > 0; return { metas, plan: manual ? S.config.ahorroMensual : metas, manual }; }
+  // Ingreso automático: promedio de lo que registraste en los últimos 3 meses con movimientos;
+  // si todavía no hay historial, lo que llevas recibido este mes.
+  function ingresoEstimado(ym) {
+    const prev = [];
+    for (let i = 1; i <= 3; i++) { const m = addMes(ym, -i); if (S.movimientos.some((x) => x.fecha.slice(0, 7) === m)) prev.push(statsMes(m).ing); }
+    const real = statsMes(ym).ing;
+    if (prev.length && suma(prev) > 0) return { v: Math.max(suma(prev) / prev.length, real), fuente: 'promedio', n: prev.length };
+    return { v: real, fuente: 'real', n: 0 };
+  }
+  const ingresoPlan = (ym) => (S.config.ingresoMensual > 0 ? { v: S.config.ingresoMensual, fuente: 'manual', n: 0 } : ingresoEstimado(ym));
+  const etiquetaIngreso = (ip) => (ip.fuente === 'manual' ? 'Ingreso del mes' : ip.fuente === 'promedio' ? `Ingreso estimado (promedio de ${ip.n} ${ip.n === 1 ? 'mes' : 'meses'})` : 'Ingresos recibidos este mes');
   function disponible(ym) {
     const st = statsMes(ym);
-    const ingresoBase = Math.max(S.config.ingresoMensual, st.ing);
+    const ip = ingresoPlan(ym);
+    const ingresoBase = Math.max(ip.v, st.ing);
     const ah = planAhorro().plan;
     const cuotas = cuotasMes(ym);
     const pend = Math.max(0, cuotas - (st.porCat[CAT_PREST] || 0));
     const sobre = ingresoBase - ah;
     const usado = st.gas + pend;
-    return { st, ingresoBase, ah, cuotas, pend, sobre, usado, libre: sobre - usado };
+    return { st, ip, ingresoBase, ah, cuotas, pend, sobre, usado, libre: sobre - usado };
   }
   function patrimonio(sal) {
     let efectivo = 0, inv = 0, tarj = 0;
@@ -630,21 +643,21 @@
 
     const pasos = [
       { ok: S.cuentas.length > 0, t: 'Agrega tus cuentas', s: 'Cheques, ahorro, efectivo y tarjetas', act: 'nueva-cuenta' },
-      { ok: S.config.ingresoMensual > 0, t: 'Escribe tu ingreso mensual', s: 'Para calcular cuánto puedes gastar', act: 'config-pres' },
+      { ok: S.config.ingresoMensual > 0 || S.movimientos.some((m) => m.tipo === 'ingreso'), t: 'Registra tus ingresos', s: 'Tu sueldo o lo que te paga tu negocio', act: 'nuevo-mov', tipo: 'ingreso' },
       { ok: S.movimientos.length > 0, t: 'Registra tu primer movimiento', s: 'Un gasto o un ingreso', act: 'nuevo-mov' }
     ];
     if (pasos.some((p) => !p.ok)) {
-      html += `<section class="section"><div class="sh"><h2>Empieza aquí</h2></div><div class="group steps">${pasos.map((p, i) => `<button class="row ${p.ok ? 'step-ok' : ''}" type="button" data-act="${p.act}"><span class="ic" style="--c:var(--tint)">${p.ok ? IC.check : i + 1}</span><span class="rt"><span class="t1">${p.t}</span><span class="t2">${p.s}</span></span><span class="amt muted">${p.ok ? 'Listo' : ''}</span></button>`).join('')}</div></section>`;
+      html += `<section class="section"><div class="sh"><h2>Empieza aquí</h2></div><div class="group steps">${pasos.map((p, i) => `<button class="row ${p.ok ? 'step-ok' : ''}" type="button" data-act="${p.act}" ${p.tipo ? `data-tipo="${p.tipo}"` : ''}><span class="ic" style="--c:var(--tint)">${p.ok ? IC.check : i + 1}</span><span class="rt"><span class="t1">${p.t}</span><span class="t2">${p.s}</span></span><span class="amt muted">${p.ok ? 'Listo' : ''}</span></button>`).join('')}</div></section>`;
     }
 
     if (d.ingresoBase <= 0) {
-      html += `<section class="hero"><p class="k">Puedes gastar este mes</p><p class="hint">Escribe tu ingreso mensual y te digo cuánto puedes gastar, cuánto separar para ahorro y cuánto te toca de préstamos.</p><button class="btn" type="button" data-act="config-pres">Definir mi ingreso</button></section>`;
+      html += `<section class="hero"><p class="k">Puedes gastar este mes</p><p class="hint">Registra tus ingresos (sueldo, negocio) y lo calculo solo: cuánto puedes gastar, cuánto separar para ahorro y cuánto te toca de préstamos.</p><div style="display:flex; gap:10px; flex-wrap:wrap"><button class="btn" type="button" data-act="nuevo-mov" data-tipo="ingreso">Registrar un ingreso</button><button class="btn tinted" type="button" data-act="config-pres">Prefiero escribirlo</button></div></section>`;
     } else {
       const ratio = d.sobre > 0 ? Math.min(1, d.usado / d.sobre) : 1;
       const color = d.libre < 0 ? 'red' : ratio > 0.85 ? 'orange' : 'green';
       const sub = d.libre > 0.005 ? `Unos ${money(d.libre / diasRest)} por día · quedan ${diasRest} ${diasRest === 1 ? 'día' : 'días'} del mes` : d.libre < -0.005 ? 'Ya gastaste más de lo que planeaste este mes' : 'Ya usaste todo lo disponible de este mes';
       html += `<section class="hero"><p class="k">Puedes gastar este mes</p><p class="big ${d.libre < -0.005 ? 'neg' : ''}">${money(d.libre)}</p><p class="sub">${sub}</p><div class="bar lg" style="--c:var(--c-${color})"><i style="width:${(ratio * 100).toFixed(1)}%"></i></div>
-        <dl class="kv"><div><dt>Ingreso del mes</dt><dd>${money(d.ingresoBase)}</dd></div><div><dt>Separado para ahorro</dt><dd>−${moneyAbs(d.ah)}</dd></div><div><dt>Ya gastaste</dt><dd>−${moneyAbs(d.st.gas)}</dd></div>${d.pend > 0.005 ? `<div><dt>Préstamos por pagar</dt><dd>−${moneyAbs(d.pend)}</dd></div>` : ''}</dl></section>`;
+        <dl class="kv"><div><dt>${etiquetaIngreso(d.st.ing >= d.ip.v && d.ip.fuente !== 'manual' ? { fuente: 'real' } : d.ip)}</dt><dd>${money(d.ingresoBase)}</dd></div><div><dt>Separado para ahorro</dt><dd>${menos(d.ah)}</dd></div><div><dt>Ya gastaste</dt><dd>${menos(d.st.gas)}</dd></div>${d.pend > 0.005 ? `<div><dt>Préstamos por pagar</dt><dd>${menos(d.pend)}</dd></div>` : ''}</dl></section>`;
     }
 
     const ahorroMes = d.st.ing - d.st.gas;
@@ -703,7 +716,7 @@
   // ================= Vista: Presupuesto =================
   let mesPres = ymHoy();
   function vPresupuesto() {
-    const ym = mesPres, st = statsMes(ym), pa = planAhorro(), cuotas = cuotasMes(ym), ing = S.config.ingresoMensual;
+    const ym = mesPres, st = statsMes(ym), pa = planAhorro(), cuotas = cuotasMes(ym), ip = ingresoPlan(ym), ing = ip.v;
     const gastos = S.categorias.filter((c) => c.tipo === 'gasto');
     const presDe = (c) => (c.id === CAT_PREST ? cuotas : c.presupuesto);
     const porGrupo = (g) => suma(gastos.filter((c) => c.grupo === g).map(presDe));
@@ -717,7 +730,7 @@
     }
 
     if (ing <= 0) {
-      html += `<section class="hero"><p class="k">Tu plan del mes</p><p class="hint">Empieza por tu ingreso mensual (lo que te llega después de impuestos). Con eso repartimos tu dinero entre necesidades, gustos, deudas y ahorro.</p><button class="btn" type="button" data-act="config-pres">Escribir mi ingreso</button></section>`;
+      html += `<section class="hero"><p class="k">Tu plan del mes</p><p class="hint">Registra tus ingresos de este mes y el plan se arma solo, repartiendo tu dinero entre necesidades, gustos, deudas y ahorro. También puedes escribir tu ingreso fijo.</p><div style="display:flex; gap:10px; flex-wrap:wrap"><button class="btn" type="button" data-act="nuevo-mov" data-tipo="ingreso">Registrar un ingreso</button><button class="btn tinted" type="button" data-act="config-pres">Escribirlo</button></div></section>`;
     } else {
       const base = Math.max(ing, asignado) || 1;
       const segs = [['Necesidades', nec, 'blue'], ['Gustos', gus, 'purple'], ['Deudas', deu, 'orange'], ['Ahorro', pa.plan, 'green']];
@@ -726,7 +739,7 @@
         ['Gustos', gus, 0.3, 'hasta'],
         ['Ahorro', pa.plan, 0.2, 'al menos']
       ];
-      html += `<section class="card"><div class="sh" style="margin-bottom:4px"><h3>Tu plan del mes</h3><span class="muted" style="font-size:15px">Ingreso ${money(ing)}</span></div>
+      html += `<section class="card"><div class="sh" style="margin-bottom:4px"><h3>Tu plan del mes</h3><span class="muted" style="font-size:15px">Ingreso ${money(ing)}${ip.fuente === 'manual' ? '' : ' · automático'}</span></div>
         <div class="stack" style="margin-top:10px">${segs.filter((s) => s[1] > 0).map((s) => `<i style="--c:var(--c-${s[2]});width:${(s[1] / base * 100).toFixed(2)}%"></i>`).join('')}</div>
         <div class="legend">${segs.map((s) => `<div style="--c:var(--c-${s[2]})"><b></b><span>${s[0]}</span><em>${pct(s[1] / ing * 100)}</em><strong>${money(s[1])}</strong></div>`).join('')}
           <div style="--c:var(--${libre < -0.005 ? 'neg' : 'fill-2'})"><b></b><span>${libre < -0.005 ? 'Te pasas de tu ingreso' : 'Sin asignar'}</span><em>${pct(Math.abs(libre) / ing * 100)}</em><strong class="${libre < -0.005 ? 'neg' : ''}">${money(libre)}</strong></div></div>
@@ -905,13 +918,13 @@
   $('#c-no').addEventListener('click', () => cerrarC(false));
 
   // ----- Movimiento -----
-  function sheetMov(id) {
+  function sheetMov(id, tipoIni) {
     if (!S.cuentas.length) {
       abrirSheet(`${cabeza('Nuevo movimiento', false)}<div class="empty" style="background:var(--sheet-card)"><strong>Primero agrega una cuenta</strong>Por ejemplo tu cuenta de cheques, el efectivo o tu tarjeta de crédito.<button class="btn small" type="button" data-act="nueva-cuenta">Agregar cuenta</button></div>`);
       return;
     }
     const x = id ? S.movimientos.find((m) => m.id === id) : null;
-    let tipo = x ? x.tipo : 'gasto';
+    let tipo = x ? x.tipo : (['gasto', 'ingreso', 'transferencia'].includes(tipoIni) ? tipoIni : 'gasto');
     const opsCuenta = (sel) => S.cuentas.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     const cuentaIni = x ? x.cuentaId : (filtro.cuenta && cuenta(filtro.cuenta) ? filtro.cuenta : (S.cuentas.find((c) => c.tipo === 'cheques') || S.cuentas[0]).id);
     const destIni = x && x.cuentaDestinoId ? x.cuentaDestinoId : (S.cuentas.find((c) => c.id !== cuentaIni) || S.cuentas[0]).id;
@@ -1095,9 +1108,9 @@
     const pa = planAhorro();
     const b = abrirSheet(`<form id="form-cfg" novalidate>${cabeza('Ingreso y ahorro')}<div style="display:grid; gap:18px">
       <div class="group">
-        <div class="frow"><label for="s-ing">Ingreso al mes</label><input id="s-ing" class="money" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${S.config.ingresoMensual ? fmtNum(S.config.ingresoMensual) : ''}" autofocus></div>
+        <div class="frow"><label for="s-ing">Ingreso al mes</label><input id="s-ing" class="money" type="text" inputmode="decimal" placeholder="Automático" autocomplete="off" value="${S.config.ingresoMensual ? fmtNum(S.config.ingresoMensual) : ''}" autofocus></div>
       </div>
-      <p class="note">Lo que te llega después de impuestos, sumando todos tus ingresos fijos del mes.</p>
+      <p class="note">${(() => { const e = ingresoEstimado(ymHoy()); return `Déjalo vacío y lo calculo con los ingresos que registras${e.v > 0 ? ` (ahora: ${money(e.v)} al mes)` : ''}. Escríbelo solo si quieres fijar una cantidad después de impuestos.`; })()}</p>
       <div class="group">
         <div class="frow"><label for="s-aho">Ahorrar al mes</label><input id="s-aho" class="money" type="text" inputmode="decimal" placeholder="Según mis metas" autocomplete="off" value="${S.config.ahorroMensual ? fmtNum(S.config.ahorroMensual) : ''}"></div>
       </div>
@@ -1228,7 +1241,7 @@
   // ================= Eventos =================
   const ACC = {
     'tab': (t) => ir(t.dataset.v),
-    'nuevo-mov': () => sheetMov(null), 'editar-mov': (t) => sheetMov(t.dataset.id),
+    'nuevo-mov': (t) => sheetMov(null, t.dataset.tipo), 'editar-mov': (t) => sheetMov(t.dataset.id),
     'nueva-cuenta': () => sheetCuenta(null), 'editar-cuenta': (t) => sheetCuenta(t.dataset.id),
     'nueva-cat': (t) => sheetCat(null, t.dataset.tipo), 'editar-cat': (t) => sheetCat(t.dataset.id),
     'nueva-meta': () => sheetMeta(null), 'editar-meta': (t) => sheetMeta(t.dataset.id),
