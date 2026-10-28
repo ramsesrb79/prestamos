@@ -319,6 +319,29 @@
   .alert-btns button + button { border-left: .5px solid var(--sep); font-weight: 600; }
   .alert-btns button.danger { color: var(--neg); }
 
+  /* Bloqueo */
+  .lock { position: fixed; inset: 0; z-index: 90; background: var(--bg); display: grid; place-items: center; overflow: auto; padding: max(24px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+  .lock-in { display: grid; justify-items: center; gap: 18px; width: 100%; max-width: 340px; }
+  .lock-ic { width: 64px; height: 64px; border-radius: 16px; font-size: 34px; }
+  .pad-wrap { display: grid; justify-items: center; gap: 12px; width: 100%; }
+  .pad-t { font: 600 20px var(--font-d); text-align: center; }
+  .pad-s { font-size: 15px; color: var(--label-2); min-height: 1.35em; text-align: center; }
+  .pad-s.neg { color: var(--neg); }
+  .dots { display: flex; gap: 16px; margin: 6px 0 12px; }
+  .dots i { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--label); }
+  .dots i.on { background: var(--label); }
+  .dots.shake { animation: shake .4s; }
+  @keyframes shake { 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
+  .pad { display: grid; grid-template-columns: repeat(3, 76px); gap: 16px 24px; justify-content: center; }
+  .pad button { width: 76px; height: 76px; border-radius: 50%; border: 0; background: var(--fill); font: 400 32px var(--font-d); color: var(--label); cursor: pointer; display: grid; place-items: center; }
+  .pad button:active { background: var(--fill-2); }
+  .pad .pad-fn { background: none; color: var(--tint); }
+  .pad .pad-fn svg { width: 30px; height: 30px; }
+  .sheet .pad button { background: var(--sheet-card); }
+  .sheet .pad .pad-fn { background: none; }
+  @media (max-height: 680px) { .pad { grid-template-columns: repeat(3, 64px); gap: 10px 20px; } .pad button { width: 64px; height: 64px; font-size: 28px; } }
+  .frow .lbl-w { width: auto; flex: 1; }
+  .field-pass { width: 100%; font: 400 17px var(--font); color: var(--label); background: var(--sheet-card); border: 0; border-radius: 10px; padding: 13px 16px; }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(100px + env(safe-area-inset-bottom, 0px)); z-index: 70; background: rgba(30, 30, 32, .92); color: #fff; padding: 12px 18px; border-radius: 14px; font: 500 15px var(--font); width: max-content; max-width: calc(100% - 32px); text-align: center; }
   @media (min-width: 900px) { .toast { bottom: 28px; } }
 </style>
@@ -341,6 +364,7 @@
     <div class="alert-btns"><button type="button" id="c-no">Cancelar</button><button type="button" id="c-si" class="danger">Eliminar</button></div>
   </div>
 </div>
+<div class="lock" id="lock" hidden><div class="lock-in"><span class="brand-ic lock-ic">$</span><div id="lk-box" style="width:100%"></div><button class="link sm" type="button" id="lk-olvide">¿Olvidaste tu código?</button></div></div>
 <div class="toast" id="toast" hidden></div>
 <input type="file" id="archivo" accept=".json,application/json" hidden>
 
@@ -406,7 +430,11 @@
     tendencia: svg('<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>', 2),
     tarjeta: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.6"/><path d="M2.5 9.8h19M6 15h4"/>', 2),
     flechas: svg('<path d="M7 7h12l-3-3M17 17H5l3 3"/>', 2),
-    check: svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>', 2.4)
+    check: svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>', 2.4),
+    cara: svg('<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M9 9.5v1M15 9.5v1M12 9.5v3.5h-1M9.5 16a3.5 3.5 0 0 0 5 0"/>'),
+    borrar: svg('<path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7z"/><path d="m12 9 5 6M17 9l-5 6"/>'),
+    candado: svg('<rect x="5" y="10.5" width="14" height="10" rx="2.2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>', 2),
+    llave: svg('<circle cx="8" cy="14" r="3.6"/><path d="m10.6 11.4 8.4-8.4M16 6l2.5 2.5M13.5 8.5 16 11"/>', 2)
   };
 
   // ================= Catálogos =================
@@ -518,10 +546,12 @@
     }).filter((m) => m.tipo !== 'transferencia' || m.cuentaDestinoId);
     out.metas = (Array.isArray(s.metas) ? s.metas : []).filter((m) => m && m.id).map((m) => ({ id: String(m.id), nombre: String(m.nombre || 'Meta'), objetivo: Math.max(0, num(m.objetivo)), ahorrado: Math.max(0, num(m.ahorrado)), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : '', color: PALETA.includes(m.color) ? m.color : 'green' }));
     out.prestamos = (Array.isArray(s.prestamos) ? s.prestamos : []).map(normalizarPrestamo);
-    out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)) };
+    out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)), claveCopia: s.config && typeof s.config.claveCopia === 'string' ? s.config.claveCopia : '' };
     return out;
   }
   function cargar() {
+    if (lockCfg() && lsGet('finanzas_enc')) { S = normalizarEstado({}); return 'bloqueada'; }
+    if (lockCfg()) lsDel('bloqueo');
     const g = lsGet('finanzas_v1');
     if (g) { S = normalizarEstado(g); return; }
     S = normalizarEstado({});
@@ -529,7 +559,171 @@
     if (Array.isArray(viejos) && viejos.length) S.prestamos = viejos.map(normalizarPrestamo);
     lsSet('finanzas_v1', S);
   }
-  function guardar() { lsSet('finanzas_v1', S); lsSet('ultimo_cambio', Date.now()); estadoCopia(); }
+  // ================= Seguridad =================
+  // Con el bloqueo activo, los datos se guardan cifrados (AES-GCM de 256 bits) con una llave que sale de tu código
+  // (PBKDF2-SHA256). Sin el código no se pueden leer. Las copias usan su propia contraseña.
+  const cifradoOk = !!(window.crypto && window.crypto.subtle);
+  const tEnc = new TextEncoder(), tDec = new TextDecoder();
+  const b64 = (buf) => { const u = new Uint8Array(buf); let x = ''; for (let i = 0; i < u.length; i += 0x8000) x += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(x); };
+  const unb64 = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
+  const rnd = (n) => crypto.getRandomValues(new Uint8Array(n));
+  const ITER_PIN = 310000, ITER_COPIA = 600000;
+  async function derivar(pass, salt, iter) {
+    const base = await crypto.subtle.importKey('raw', tEnc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function cifrar(key, obj) { const iv = rnd(12); const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, tEnc.encode(JSON.stringify(obj))); return { iv: b64(iv), ct: b64(ct) }; }
+  async function descifrar(key, iv, ct) { const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, key, unb64(ct)); return JSON.parse(tDec.decode(pt)); }
+  const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) {} };
+  const lockCfg = () => lsGet('bloqueo');
+  const sesion = { key: null, bloqueada: false };
+  let cadena = Promise.resolve();
+  let bioOk = false;
+  function persistir() {
+    if (lockCfg()) {
+      if (!sesion.key) return;
+      const snap = JSON.parse(JSON.stringify(S)), key = sesion.key;
+      cadena = cadena.then(() => cifrar(key, snap)).then((c) => lsSet('finanzas_enc', c)).catch(() => toast('No se pudo guardar el cambio. Inténtalo otra vez.'));
+    } else lsSet('finanzas_v1', S);
+  }
+  function guardar() { persistir(); lsSet('ultimo_cambio', Date.now()); estadoCopia(); }
+
+  function idb() { return new Promise((res, rej) => { const r = indexedDB.open('mis-finanzas', 1); r.onupgradeneeded = () => r.result.createObjectStore('k'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  async function idbOp(modo, fn) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction('k', modo); const r = fn(t.objectStore('k')); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); }
+  const idbPut = (k, v) => idbOp('readwrite', (st) => st.put(v, k));
+  const idbGet = (k) => idbOp('readonly', (st) => st.get(k));
+  const idbDel = (k) => idbOp('readwrite', (st) => st.delete(k));
+  async function revisarBio() { try { bioOk = !!(window.PublicKeyCredential && window.isSecureContext && window.indexedDB && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { bioOk = false; } }
+
+  async function activarBloqueo(pin) {
+    const salt = rnd(16), key = await derivar(pin, salt, ITER_PIN);
+    lsSet('finanzas_enc', await cifrar(key, S));
+    const prev = lockCfg();
+    lsSet('bloqueo', { v: 1, salt: b64(salt), iter: ITER_PIN, ...(prev && prev.bio ? { bio: prev.bio } : {}) });
+    sesion.key = key;
+    ['finanzas_v1', 'prestamos_v2', 'prestamos', 'pagosExtras'].forEach(lsDel);
+    if (prev && prev.bio) { try { await idbPut('aes', key); } catch (e) { const c = lockCfg(); delete c.bio; lsSet('bloqueo', c); } }
+  }
+  async function probarPin(pin) {
+    const c = lockCfg(), e = lsGet('finanzas_enc');
+    await cadena;
+    const key = await derivar(pin, unb64(c.salt), c.iter);
+    const datos = await descifrar(key, e.iv, e.ct);
+    return { key, datos };
+  }
+  async function quitarBloqueo() {
+    await cadena;
+    lsSet('finanzas_v1', S);
+    try { await idbDel('aes'); } catch (e) {}
+    ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel);
+    sesion.key = null;
+  }
+  async function activarBio() {
+    try {
+      const cred = await navigator.credentials.create({ publicKey: {
+        challenge: rnd(32), rp: { name: 'Mis Finanzas' }, user: { id: rnd(16), name: 'mis-finanzas', displayName: 'Mis Finanzas' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, timeout: 60000 } });
+      await idbPut('aes', sesion.key);
+      if (!(await idbGet('aes'))) throw new Error('sin llave');
+      const c = lockCfg(); c.bio = b64(cred.rawId); lsSet('bloqueo', c);
+      toast('Face ID activado');
+    } catch (e) {
+      toast(e && e.name === 'NotAllowedError' ? 'No se activó Face ID.' : 'Face ID no está disponible aquí. Sigue usando tu código.');
+    }
+  }
+  async function desactivarBio() { const c = lockCfg(); if (c) { delete c.bio; lsSet('bloqueo', c); } try { await idbDel('aes'); } catch (e) {} }
+  async function abrirConBio() {
+    const c = lockCfg(); if (!c || !c.bio) return false;
+    try {
+      await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: unb64(c.bio) }], userVerification: 'required', timeout: 60000 } });
+      const key = await idbGet('aes'); if (!key) return false;
+      const e = lsGet('finanzas_enc');
+      desbloqueado(key, await descifrar(key, e.iv, e.ct));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // Teclado de código (pantalla de bloqueo y hojas de ajustes)
+  let padActivo = null;
+  function crearPad(root, o) {
+    let pin = '', ocupado = false;
+    root.innerHTML = `<div class="pad-wrap"><h2 class="pad-t">${esc(o.titulo)}</h2><p class="pad-s" role="status">${esc(o.sub || '')}</p><div class="dots" aria-hidden="true">${'<i></i>'.repeat(6)}</div><div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-k="${n}">${n}</button>`).join('')}${o.bio ? `<button type="button" data-k="bio" class="pad-fn" aria-label="Usar Face ID">${IC.cara}</button>` : '<span></span>'}<button type="button" data-k="0">0</button><button type="button" data-k="del" class="pad-fn" aria-label="Borrar">${IC.borrar}</button></div></div>`;
+    const dots = [...root.querySelectorAll('.dots i')], sEl = root.querySelector('.pad-s');
+    const pinta = () => dots.forEach((d, i) => d.classList.toggle('on', i < pin.length));
+    const api = {
+      tecla(k) {
+        if (k === 'bio') { if (!ocupado && o.alBio) o.alBio(); return; }
+        if (ocupado) return;
+        if (k === 'del') { pin = pin.slice(0, -1); pinta(); return; }
+        if (!/^\d$/.test(k) || pin.length >= 6) return;
+        pin += k; pinta();
+        if (pin.length === 6) { const v = pin; ocupado = true; setTimeout(() => o.alCompletar(v, api), 120); }
+      },
+      reset(msg, error) {
+        pin = ''; ocupado = false; pinta();
+        if (msg != null) sEl.textContent = msg;
+        sEl.classList.toggle('neg', !!error);
+        if (error) { const d = root.querySelector('.dots'); d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); }
+      },
+      titulo(t) { root.querySelector('.pad-t').textContent = t; },
+      espera(msg) { ocupado = true; sEl.textContent = msg; sEl.classList.remove('neg'); }
+    };
+    root.querySelector('.pad').addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) api.tecla(b.dataset.k); });
+    padActivo = api;
+    return api;
+  }
+  const esperaRestante = () => Math.max(0, (lsGet('bloqueo_hasta') || 0) - Date.now());
+  function mostrarLock() {
+    sesion.bloqueada = true;
+    if (!$('#sheet').hidden) cerrarSheet();
+    if (!$('#confirm').hidden) cerrarC(false);
+    $('#lock').hidden = false;
+    const c = lockCfg(), conBio = !!(c && c.bio && bioOk);
+    const pad = crearPad($('#lk-box'), {
+      titulo: 'Escribe tu código', sub: conBio ? 'O usa Face ID' : '', bio: conBio,
+      alBio: () => intentarBio(pad),
+      alCompletar: async (pin, api) => {
+        const w = esperaRestante();
+        if (w > 0) { api.reset(`Espera ${Math.ceil(w / 1000)} segundos para intentar otra vez`, true); return; }
+        api.espera('Abriendo…');
+        try { const r = await probarPin(pin); desbloqueado(r.key, r.datos); }
+        catch (e) {
+          const n = (lsGet('bloqueo_fallos') || 0) + 1; lsSet('bloqueo_fallos', n);
+          if (n >= 5) { const seg = 30 * Math.pow(2, n - 5); lsSet('bloqueo_hasta', Date.now() + seg * 1000); api.reset(`Código incorrecto. Espera ${seg} segundos.`, true); }
+          else api.reset('Código incorrecto', true);
+        }
+      }
+    });
+    if (conBio) intentarBio(pad);
+  }
+  async function intentarBio(pad) { pad.espera('Usando Face ID…'); const ok = await abrirConBio(); if (!ok && sesion.bloqueada) pad.reset('Escribe tu código', false); }
+  function desbloqueado(key, datos) {
+    sesion.key = key; sesion.bloqueada = false;
+    S = normalizarEstado(datos); cacheAm.clear();
+    lsSet('bloqueo_fallos', 0); lsDel('bloqueo_hasta');
+    $('#lock').hidden = true; $('#lk-box').innerHTML = ''; padActivo = null;
+    render();
+  }
+  function bloquearAhora() {
+    if (!lockCfg()) return;
+    sesion.key = null; S = normalizarEstado({}); cacheAm.clear(); prestAbierto = null;
+    $('#view').innerHTML = '';
+    mostrarLock();
+  }
+  $('#lk-olvide').addEventListener('click', async () => {
+    if (!(await confirmar('¿Olvidaste tu código?', 'Por seguridad, sin el código no se pueden abrir tus datos. Puedes borrarlos y luego cargar tu última copia con «Abrir copia».', 'Borrar y empezar'))) return;
+    try { await idbDel('aes'); } catch (e) {}
+    ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta', 'finanzas_v1', 'ultima_copia', 'ultimo_cambio'].forEach(lsDel);
+    desbloqueado(null, {});
+    persistir();
+    toast('Datos borrados. Usa «Abrir copia» en Ajustes para recuperarlos.');
+  });
+  let ocultoDesde = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { ocultoDesde = Date.now(); return; }
+    if (lockCfg() && !sesion.bloqueada && ocultoDesde && Date.now() - ocultoDesde > 60000) bloquearAhora();
+  });
   const cuenta = (id) => S.cuentas.find((c) => c.id === id);
   const cat = (id) => S.categorias.find((c) => c.id === id);
 
@@ -945,7 +1139,7 @@
   // ================= Hojas =================
   let alCerrar = null;
   function abrirSheet(html) { const b = $('#sheet-box'); b.innerHTML = html; $('#sheet').hidden = false; b.scrollTop = 0; setTimeout(() => { const f = b.querySelector('[autofocus]'); if (f && window.matchMedia('(pointer: fine)').matches) f.focus(); }, 60); return b; }
-  function cerrarSheet() { $('#sheet').hidden = true; $('#sheet-box').innerHTML = ''; if (alCerrar) { const f = alCerrar; alCerrar = null; f(); } }
+  function cerrarSheet() { $('#sheet').hidden = true; $('#sheet-box').innerHTML = ''; if ($('#lock').hidden) padActivo = null; if (alCerrar) { const f = alCerrar; alCerrar = null; f(); } }
   const cabeza = (titulo, guardar = true) => `<div class="sheet-head"><button class="link" type="button" data-act="cerrar-sheet">${guardar ? 'Cancelar' : 'Cerrar'}</button><h2>${esc(titulo)}</h2>${guardar ? '<button class="link strong" type="submit">Guardar</button>' : '<span></span>'}</div>`;
   const opsColor = (sel) => `<div class="colors">${PALETA.map((c) => `<label style="--c:var(--c-${c})"><input type="radio" name="color" value="${c}" ${sel === c ? 'checked' : ''} aria-label="${c}"></label>`).join('')}</div>`;
 
@@ -1185,14 +1379,93 @@
   function hayDatos() { return S.cuentas.length || S.movimientos.length || S.prestamos.length || S.metas.length || S.config.ingresoMensual; }
   function estadoCopia() { const c = textoCopia(); document.querySelectorAll('[data-dot]').forEach((d) => { d.hidden = c.ok || !hayDatos(); }); }
   function sheetAjustes() {
-    const c = textoCopia();
+    const c = textoCopia(), lk = lockCfg();
     const b = abrirSheet(`${cabeza('Ajustes y copia', false)}<div style="display:grid; gap:18px">
       <div class="group"><div class="row plain" style="cursor:default"><span class="ic" style="--c:var(--c-${c.ok ? 'green' : 'orange'})">${c.ok ? IC.check : '!'}</span><span class="rt"><span class="t1">${esc(c.t)}</span><span class="t2">Tus datos se guardan solo en este dispositivo</span></span></div></div>
       <div class="sheet-actions"><button class="btn block" type="button" data-act="guardar-copia">Guardar copia</button><button class="btn block tinted" type="button" data-act="abrir-copia">Abrir copia</button></div>
-      <p class="note" style="margin-top:0">«Guardar copia» crea el archivo <b>mis-finanzas.json</b>. Guárdalo donde prefieras: iCloud Drive, Google Drive, OneDrive o tu computadora. En otro dispositivo, usa «Abrir copia» para cargar todo.</p>
+      <p class="note" style="margin-top:0">«Guardar copia» crea el archivo <b>mis-finanzas.json</b>${cifradoOk ? ', cifrado con tu contraseña de copias' : ''}. Guárdalo donde prefieras: iCloud Drive, Google Drive, OneDrive o tu computadora. En otro dispositivo, usa «Abrir copia» para cargar todo.</p>
+      ${cifradoOk ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Seguridad</p><div class="group">
+        <div class="frow"><label for="z-lock" class="lbl-w">Bloquear con código</label><input id="z-lock" class="switch" type="checkbox" ${lk ? 'checked' : ''}></div>
+        ${lk && bioOk ? `<div class="frow"><label for="z-bio" class="lbl-w">Usar Face ID o Touch ID</label><input id="z-bio" class="switch" type="checkbox" ${lk.bio ? 'checked' : ''}></div>` : ''}
+        ${lk ? `<button class="row plain" type="button" id="z-cambiar"><span class="rt"><span class="t1" style="color:var(--tint)">Cambiar código</span></span></button><button class="row plain" type="button" id="z-ahora"><span class="rt"><span class="t1" style="color:var(--tint)">Bloquear ahora</span></span></button>` : ''}
+        <button class="row plain" type="button" id="z-clave"><span class="rt"><span class="t1">Contraseña de las copias</span><span class="t2">${S.config.claveCopia ? 'Lista. Tus copias se guardan cifradas.' : 'Crea una para cifrar tus copias'}</span></span><span class="amt" style="color:var(--tint)">${S.config.claveCopia ? 'Cambiar' : 'Crear'}</span></button>
+      </div><p class="note">${lk ? 'La app se bloquea al abrirla y cuando la dejas más de un minuto. Tus datos están cifrados con tu código.' : 'Con el bloqueo, la app pide tu código al abrirse y tus datos se guardan cifrados en el dispositivo.'}</p></div>` : '<p class="note">El bloqueo y las copias cifradas funcionan cuando abres la app desde su dirección web (https).</p>'}
       <button class="btn block destructive" type="button" data-act="borrar-todo">Borrar todos los datos</button>
     </div>`);
+    if (!cifradoOk) return b;
+    $('#z-lock', b).addEventListener('change', (e) => { e.target.checked = !!lk; sheetPin(lk ? 'quitar' : 'crear'); });
+    const bio = $('#z-bio', b);
+    if (bio) bio.addEventListener('change', async (e) => { if (e.target.checked) await activarBio(); else { await desactivarBio(); toast('Face ID desactivado'); } sheetAjustes(); });
+    if (lk) { $('#z-cambiar', b).addEventListener('click', () => sheetPin('cambiar')); $('#z-ahora', b).addEventListener('click', () => bloquearAhora()); }
+    $('#z-clave', b).addEventListener('click', () => sheetClaveCopia(false));
     return b;
+  }
+  function sheetPin(modo) {
+    const titulos = { crear: 'Bloquear con código', cambiar: 'Cambiar código', quitar: 'Quitar bloqueo' };
+    const b = abrirSheet(`<div class="sheet-head"><button class="link" type="button" id="pin-cancel">Cancelar</button><h2>${titulos[modo]}</h2><span></span></div><div id="pin-box"></div><p class="note" id="pin-note" style="text-align:center"></p>`);
+    $('#pin-cancel', b).addEventListener('click', () => sheetAjustes());
+    const box = $('#pin-box', b);
+    const pedirNuevo = (titulo) => {
+      let primero = null;
+      crearPad(box, { titulo, sub: '6 dígitos', alCompletar: async (pin, api) => {
+        if (primero === null) { primero = pin; api.titulo('Confirma tu código'); api.reset('Escríbelo otra vez', false); return; }
+        if (pin !== primero) { primero = null; api.titulo(titulo); api.reset('No coinciden. Empieza de nuevo.', true); return; }
+        api.espera('Cifrando tus datos…');
+        try { await activarBloqueo(pin); toast(modo === 'crear' ? 'Bloqueo activado' : 'Código cambiado'); sheetAjustes(); }
+        catch (e) { api.reset('No se pudo guardar. Inténtalo otra vez.', true); primero = null; }
+      } });
+    };
+    if (modo === 'crear') {
+      $('#pin-note', b).textContent = 'Te lo pedirá cada vez que abras la app. Tus datos quedan cifrados con este código: si lo olvidas, solo los recuperas con una copia.';
+      pedirNuevo('Crea un código');
+    } else {
+      crearPad(box, { titulo: 'Escribe tu código actual', alCompletar: async (pin, api) => {
+        api.espera('Revisando…');
+        try { await probarPin(pin); }
+        catch (e) { api.reset('Código incorrecto', true); return; }
+        if (modo === 'quitar') { await quitarBloqueo(); toast('Bloqueo quitado'); sheetAjustes(); }
+        else pedirNuevo('Escribe el código nuevo');
+      } });
+    }
+  }
+  let cacheClave = null;
+  async function llaveCopia() {
+    const pass = S.config.claveCopia;
+    if (cacheClave && cacheClave.pass === pass) return cacheClave;
+    const salt = rnd(16);
+    cacheClave = { pass, salt, key: await derivar(pass, salt, ITER_COPIA) };
+    return cacheClave;
+  }
+  function sheetClaveCopia(despuesGuardar) {
+    const b = abrirSheet(`<form id="form-clave" novalidate>${cabeza(S.config.claveCopia ? 'Cambiar contraseña' : 'Contraseña de las copias')}<div style="display:grid; gap:14px">
+      <p class="note" style="margin:0">Tus copias se guardan cifradas con esta contraseña. La necesitarás para abrirlas en otro dispositivo. Usa al menos 8 caracteres y guárdala en un lugar seguro: sin ella, la copia no se puede abrir.</p>
+      <input id="c-pass" class="field-pass" type="password" placeholder="Contraseña" autocomplete="new-password" autofocus>
+      <input id="c-pass2" class="field-pass" type="password" placeholder="Repite la contraseña" autocomplete="new-password">
+      <p class="form-error" id="c-error" role="alert"></p>
+    </div></form>`);
+    $('#form-clave', b).addEventListener('submit', (e) => {
+      e.preventDefault();
+      const a = $('#c-pass', b).value, a2 = $('#c-pass2', b).value;
+      if (a.length < 8) { $('#c-error', b).textContent = 'Usa al menos 8 caracteres.'; return; }
+      if (a !== a2) { $('#c-error', b).textContent = 'Las contraseñas no coinciden.'; return; }
+      S.config.claveCopia = a; cacheClave = null; guardar(); llaveCopia().catch(() => {});
+      toast('Contraseña guardada');
+      if (despuesGuardar) { sheetAjustes(); toast('Contraseña lista. Toca «Guardar copia».'); } else sheetAjustes();
+    });
+  }
+  function sheetPedirClave(probar, alAbrir) {
+    const b = abrirSheet(`<form id="form-abrir" novalidate>${cabeza('Abrir copia cifrada')}<div style="display:grid; gap:14px">
+      <p class="note" style="margin:0">Escribe la contraseña con la que guardaste esta copia.</p>
+      <input id="o-pass" class="field-pass" type="password" placeholder="Contraseña de la copia" autocomplete="current-password" autofocus>
+      <p class="form-error" id="o-error" role="alert"></p>
+    </div></form>`);
+    $('#form-abrir', b).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('#o-error', b).textContent = ''; const btn = b.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = 'Abriendo…';
+      try { const datos = await probar($('#o-pass', b).value); cerrarSheet(); alAbrir(datos); }
+      catch (er) { $('#o-error', b).textContent = 'Contraseña incorrecta o copia dañada.'; btn.disabled = false; btn.textContent = 'Guardar'; }
+    });
+    b.querySelector('[type=submit]').textContent = 'Abrir';
   }
 
   // ----- Préstamo -----
@@ -1240,7 +1513,17 @@
   // ================= Copia de seguridad =================
   async function guardarCopia() {
     if (!hayDatos()) { toast('Todavía no hay datos para guardar.'); return; }
-    const texto = JSON.stringify({ app: 'mis-finanzas', version: 3, fecha: new Date().toISOString(), datos: S }, null, 2);
+    let texto;
+    const { claveCopia, ...cfg } = S.config;
+    const datosCopia = { ...S, config: cfg };
+    if (cifradoOk) {
+      if (!claveCopia) { sheetClaveCopia(true); return; }
+      try {
+        const k = await llaveCopia();
+        const c = await cifrar(k.key, datosCopia);
+        texto = JSON.stringify({ app: 'mis-finanzas', version: 4, fecha: new Date().toISOString(), cifrado: { alg: 'AES-GCM', kdf: 'PBKDF2-SHA256', iter: ITER_COPIA, salt: b64(k.salt), iv: c.iv }, datos: c.ct });
+      } catch (e) { toast('No se pudo cifrar la copia.'); return; }
+    } else texto = JSON.stringify({ app: 'mis-finanzas', version: 3, fecha: new Date().toISOString(), datos: datosCopia }, null, 2);
     const nombre = 'mis-finanzas.json';
     const listo = () => { lsSet('ultima_copia', Date.now()); estadoCopia(); if (!$('#sheet').hidden && $('#sheet-box .sheet-head h2') && $('#sheet-box .sheet-head h2').textContent === 'Ajustes y copia') sheetAjustes(); toast('Copia guardada'); };
     let dl = null;
@@ -1254,7 +1537,7 @@
     if (tactil && navigator.canShare) {
       try {
         const archivo = new File([texto], nombre, { type: 'application/json' });
-        if (navigator.canShare({ files: [archivo] })) { await navigator.share({ files: [archivo], title: 'Copia de Mis Finanzas' }); listo(); return; }
+        if (navigator.canShare({ files: [archivo] })) { await navigator.share({ files: [archivo] }); listo(); return; }
       } catch (e) { if (e && e.name === 'AbortError') return; }
     }
     try {
@@ -1270,10 +1553,19 @@
       $('#archivo').value = '';
       let d;
       try { d = JSON.parse(reader.result); } catch (e) { toast('Ese archivo no es una copia de Mis Finanzas.'); return; }
-      if (d && d.datos && typeof d.datos === 'object') {
+      const aplicar = async (datos) => {
         if (!(await confirmar('¿Abrir esta copia?', 'Se reemplazan todos los datos de este dispositivo por los de la copia.', 'Abrir copia'))) return;
-        S = normalizarEstado(d.datos);
-      } else if (d && Array.isArray(d.prestamos)) {
+        const clave = S.config.claveCopia;
+        S = normalizarEstado(datos); if (!S.config.claveCopia) S.config.claveCopia = clave;
+        cacheAm.clear(); guardar(); lsSet('ultima_copia', Date.now()); cerrarSheet(); prestAbierto = null; render(); toast('Copia cargada');
+      };
+      if (d && d.cifrado && typeof d.datos === 'string') {
+        if (!cifradoOk) { toast('Abre la app desde su dirección web para abrir copias cifradas.'); return; }
+        sheetPedirClave(async (pass) => { const k = await derivar(pass, unb64(d.cifrado.salt), d.cifrado.iter || ITER_COPIA); return descifrar(k, d.cifrado.iv, d.datos); }, (datos) => { aplicar(datos); });
+        return;
+      }
+      if (d && d.datos && typeof d.datos === 'object') { await aplicar(d.datos); return; }
+      else if (d && Array.isArray(d.prestamos)) {
         const lista = desdeFormatoViejo(d.prestamos, d.pagosExtras);
         if (!lista.length) { toast('La copia no trae préstamos.'); return; }
         if (!(await confirmar('¿Cargar préstamos?', `Se cargarán ${lista.length} préstamo(s) de una copia anterior. Si alguno ya existe, se reemplaza.`, 'Cargar', false))) return;
@@ -1305,6 +1597,8 @@
     'abrir-copia': () => $('#archivo').click(),
     'borrar-todo': async () => {
       if (!(await confirmar('¿Borrar todos los datos?', 'Se borran cuentas, movimientos, presupuesto, metas y préstamos de este dispositivo. Guarda una copia antes si la necesitas.', 'Borrar todo'))) return;
+      try { await idbDel('aes'); } catch (e) {}
+      ['finanzas_enc', 'bloqueo', 'bloqueo_fallos', 'bloqueo_hasta'].forEach(lsDel); sesion.key = null; cacheClave = null;
       S = normalizarEstado({}); cacheAm.clear(); prestAbierto = null; guardar(); lsSet('ultima_copia', 0); cerrarSheet(); render(); toast('Datos borrados');
     }
   };
@@ -1318,7 +1612,14 @@
   });
   $('#sheet').addEventListener('click', (e) => { if (e.target === $('#sheet')) cerrarSheet(); });
   $('#confirm').addEventListener('click', (e) => { if (e.target === $('#confirm')) cerrarC(false); });
-  document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (!$('#confirm').hidden) cerrarC(false); else if (!$('#sheet').hidden) cerrarSheet(); });
+  document.addEventListener('keydown', (e) => {
+    if (!padActivo || e.metaKey || e.ctrlKey || e.altKey) return;
+    const visible = !$('#lock').hidden || (!$('#sheet').hidden && $('#sheet-box .pad-wrap'));
+    if (!visible) return;
+    if (/^\d$/.test(e.key)) { padActivo.tecla(e.key); e.preventDefault(); }
+    else if (e.key === 'Backspace') { padActivo.tecla('del'); e.preventDefault(); }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (!$('#lock').hidden) return; if (!$('#confirm').hidden) cerrarC(false); else if (!$('#sheet').hidden) cerrarSheet(); });
   // Montos tipo caja registradora: cada dígito entra por la derecha (2 → 0.02, 20 → 0.20, 2056 → 20.56)
   document.addEventListener('input', (e) => {
     const t = e.target;
@@ -1362,10 +1663,12 @@
   window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VISTAS[v] && v !== vista) { vista = v; prestAbierto = null; render(); } });
 
   // ================= Inicio =================
-  cargar();
+  const estadoIni = cargar();
   const h = location.hash.slice(1);
   if (VISTAS[h]) vista = h;
-  render();
+  if (cifradoOk) revisarBio().then(() => { if (estadoIni === 'bloqueada') mostrarLock(); });
+  else if (estadoIni === 'bloqueada') mostrarLock();
+  if (estadoIni !== 'bloqueada') render();
 })();
 </script>
 <script>
