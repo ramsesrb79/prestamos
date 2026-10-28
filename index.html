@@ -872,7 +872,7 @@
   function montarDetalle() {
     const p = S.prestamos.find((x) => x.id === prestAbierto); if (!p) return;
     const a = amortizar(p);
-    $('#tbody').innerHTML = a.rows.map((r) => `<tr id="r-${r.m}"><td>${r.m}</td><td>${fFecha(r.fecha)}</td><td class="pago"></td><td class="cap"></td><td class="int"></td><td><input class="abono money" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" data-m="${r.m}" aria-label="Abono extra del pago ${r.m}"></td><td class="sal"></td></tr>`).join('');
+    $('#tbody').innerHTML = a.rows.map((r) => `<tr id="r-${r.m}"><td>${r.m}</td><td>${fFecha(r.fecha)}</td><td class="pago"></td><td class="cap"></td><td class="int"></td><td><input class="abono money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" data-m="${r.m}" aria-label="Abono extra del pago ${r.m}"></td><td class="sal"></td></tr>`).join('');
     filas = [null];
     a.rows.forEach((r) => { const tr = document.getElementById('r-' + r.m); filas.push({ tr, pago: tr.querySelector('.pago'), cap: tr.querySelector('.cap'), int: tr.querySelector('.int'), sal: tr.querySelector('.sal'), inp: tr.querySelector('input') }); });
     actualizarDetalle();
@@ -976,7 +976,7 @@
     const b = abrirSheet(`<form id="form-mov" novalidate>${cabeza(x ? 'Editar movimiento' : 'Nuevo movimiento')}
       <div style="display:grid; gap:18px">
       <div class="seg" role="group" aria-label="Tipo de movimiento"><button type="button" data-tipo="gasto">Gasto</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferencia</button></div>
-      <div class="monto"><span>$</span><input id="m-monto" class="money" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${x ? fmtNum(x.monto) : ''}" autofocus></div>
+      <div class="monto"><span>$</span><input id="m-monto" class="money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${x ? fmtNum(x.monto) : ''}" autofocus></div>
       <div class="group">
         <div class="frow"><label for="m-cuenta" id="l-cuenta">Cuenta</label><select id="m-cuenta">${opsCuenta(cuentaIni)}</select></div>
         <div class="frow" id="row-dest"><label for="m-dest">Hacia</label><select id="m-dest">${opsCuenta(destIni)}</select></div>
@@ -1033,7 +1033,7 @@
         <div class="frow"><label for="a-nombre">Nombre</label><input id="a-nombre" type="text" placeholder="Ej. Chase cheques" value="${c ? esc(c.nombre) : ''}" autocomplete="off" autofocus></div>
         <div class="frow"><label for="a-tipo">Tipo</label><select id="a-tipo">${Object.entries(TIPOS_CUENTA).map(([k, t]) => `<option value="${k}" ${(c ? c.tipo : 'cheques') === k ? 'selected' : ''}>${t.n}</option>`).join('')}</select></div>
         <div class="frow"><label for="a-saldo" id="l-saldo">Saldo actual</label><input id="a-saldo" class="money signed" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
-        <div class="frow" id="row-lim"><label for="a-lim">Límite de crédito</label><input id="a-lim" class="money" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${c && c.limite ? fmtNum(c.limite) : ''}"></div>
+        <div class="frow" id="row-lim"><label for="a-lim">Límite de crédito</label><input id="a-lim" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${c && c.limite ? fmtNum(c.limite) : ''}"></div>
       </div>
       <p class="note" id="a-hint"></p>
       <p class="form-error" id="a-error" role="alert"></p>
@@ -1083,7 +1083,7 @@
       <div class="group">
         <div class="frow"><label for="k-nombre">Nombre</label><input id="k-nombre" type="text" value="${c ? esc(c.nombre) : ''}" placeholder="Ej. Mascotas" autocomplete="off" ${sis ? 'disabled' : 'autofocus'}></div>
         ${tipo === 'gasto' ? `<div class="frow"><label for="k-grupo">Tipo de gasto</label><select id="k-grupo" ${sis ? 'disabled' : ''}>${Object.entries(GRUPOS).map(([k, n]) => `<option value="${k}" ${(c ? c.grupo : 'gustos') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-        <div class="frow"><label for="k-pres">Límite al mes</label><input id="k-pres" class="money" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${sis ? fmtNum(cuotasMes(mesPres)) : (c && c.presupuesto ? fmtNum(c.presupuesto) : '')}" ${sis ? 'disabled' : ''}></div>` : ''}
+        <div class="frow"><label for="k-pres">Límite al mes</label><input id="k-pres" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${sis ? fmtNum(cuotasMes(mesPres)) : (c && c.presupuesto ? fmtNum(c.presupuesto) : '')}" ${sis ? 'disabled' : ''}></div>` : ''}
         ${sis ? '' : `<div class="frow col"><span class="lbl">Color</span>${opsColor(c ? c.color : 'blue')}</div>`}
       </div>
       <p class="note">${sis ? 'El límite de esta categoría es la suma de las cuotas de tus préstamos de este mes. Registra aquí tus pagos de préstamos para que el presupuesto los vea.' : tipo === 'gasto' ? 'Necesidades: lo indispensable (renta, comida, luz). Gustos: lo que podrías recortar. Deudas: pagos de créditos.' : ''}</p>
@@ -1118,8 +1118,8 @@
     const b = abrirSheet(`<form id="form-meta" novalidate>${cabeza(m ? 'Editar meta' : 'Nueva meta')}<div style="display:grid; gap:18px">
       <div class="group">
         <div class="frow"><label for="g-nombre">Nombre</label><input id="g-nombre" type="text" placeholder="Ej. Fondo de emergencia" value="${m ? esc(m.nombre) : ''}" autocomplete="off" autofocus></div>
-        <div class="frow"><label for="g-obj">Quiero juntar</label><input id="g-obj" class="money" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${m ? fmtNum(m.objetivo) : ''}"></div>
-        <div class="frow"><label for="g-aho">Ya tengo</label><input id="g-aho" class="money" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${m && m.ahorrado ? fmtNum(m.ahorrado) : ''}"></div>
+        <div class="frow"><label for="g-obj">Quiero juntar</label><input id="g-obj" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${m ? fmtNum(m.objetivo) : ''}"></div>
+        <div class="frow"><label for="g-aho">Ya tengo</label><input id="g-aho" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${m && m.ahorrado ? fmtNum(m.ahorrado) : ''}"></div>
         <div class="frow"><label for="g-fecha">Para cuándo</label><input id="g-fecha" type="date" value="${m ? m.fecha : ''}"></div>
         <div class="frow col"><span class="lbl">Color</span>${opsColor(m ? m.color : 'green')}</div>
       </div>
@@ -1154,11 +1154,11 @@
     const pa = planAhorro();
     const b = abrirSheet(`<form id="form-cfg" novalidate>${cabeza('Ingreso y ahorro')}<div style="display:grid; gap:18px">
       <div class="group">
-        <div class="frow"><label for="s-ing">Ingreso al mes</label><input id="s-ing" class="money" type="text" inputmode="decimal" placeholder="Automático" autocomplete="off" value="${S.config.ingresoMensual ? fmtNum(S.config.ingresoMensual) : ''}" autofocus></div>
+        <div class="frow"><label for="s-ing">Ingreso al mes</label><input id="s-ing" class="money" type="text" inputmode="numeric" placeholder="Automático" autocomplete="off" value="${S.config.ingresoMensual ? fmtNum(S.config.ingresoMensual) : ''}" autofocus></div>
       </div>
       <p class="note">${(() => { const e = ingresoEstimado(ymHoy()); return `Déjalo vacío y lo calculo con los ingresos que registras${e.v > 0 ? ` (ahora: ${money(e.v)} al mes)` : ''}. Escríbelo solo si quieres fijar una cantidad después de impuestos.`; })()}</p>
       <div class="group">
-        <div class="frow"><label for="s-aho">Ahorrar al mes</label><input id="s-aho" class="money" type="text" inputmode="decimal" placeholder="Según mis metas" autocomplete="off" value="${S.config.ahorroMensual ? fmtNum(S.config.ahorroMensual) : ''}"></div>
+        <div class="frow"><label for="s-aho">Ahorrar al mes</label><input id="s-aho" class="money" type="text" inputmode="numeric" placeholder="Según mis metas" autocomplete="off" value="${S.config.ahorroMensual ? fmtNum(S.config.ahorroMensual) : ''}"></div>
       </div>
       <p class="note" id="s-hint"></p>
     </div></form>`);
@@ -1202,7 +1202,7 @@
       <div class="group">
         <div class="frow"><label for="p-nombre">Nombre</label><input id="p-nombre" type="text" placeholder="Ej. Casa, Toyota" value="${p ? esc(p.nombre) : ''}" autocomplete="off" autofocus></div>
         <div class="frow"><label for="p-tipo">Tipo</label><select id="p-tipo">${Object.entries(TIPOS_PREST).map(([k, n]) => `<option value="${k}" ${(p ? p.tipo : 'hipoteca') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-        <div class="frow"><label for="p-monto">Monto financiado</label><input id="p-monto" class="money" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${p ? fmtNum(p.monto) : ''}"></div>
+        <div class="frow"><label for="p-monto">Monto financiado</label><input id="p-monto" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${p ? fmtNum(p.monto) : ''}"></div>
         <div class="frow"><label for="p-tasa">Tasa anual (%)</label><input id="p-tasa" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${p ? p.tasa : ''}"></div>
         <div class="frow"><label for="p-plazo">Plazo (años)</label><input id="p-plazo" type="text" inputmode="decimal" placeholder="0" autocomplete="off" value="${p ? p.plazo : ''}"></div>
         <div class="frow"><label for="p-fecha">Primer pago</label><input id="p-fecha" type="date" value="${p ? p.fecha : hoyISO()}"></div>
@@ -1319,9 +1319,28 @@
   $('#sheet').addEventListener('click', (e) => { if (e.target === $('#sheet')) cerrarSheet(); });
   $('#confirm').addEventListener('click', (e) => { if (e.target === $('#confirm')) cerrarC(false); });
   document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (!$('#confirm').hidden) cerrarC(false); else if (!$('#sheet').hidden) cerrarSheet(); });
+  // Montos tipo caja registradora: cada dígito entra por la derecha (2 → 0.02, 20 → 0.20, 2056 → 20.56)
   document.addEventListener('input', (e) => {
     const t = e.target;
-    if (t.matches && t.matches('input.money')) { const re = t.classList.contains('signed') ? /[^0-9.,\-]/g : /[^0-9.,]/g; const l = t.value.replace(re, ''); if (l !== t.value) t.value = l; }
+    if (!(t.matches && t.matches('input.money'))) return;
+    const neg = t.classList.contains('signed') && t.value.includes('-');
+    const dig = t.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 11);
+    if (!dig) { t.value = neg ? '-' : ''; return; }
+    t.value = (neg ? '-' : '') + fmtNum(parseInt(dig, 10) / 100);
+    try { t.setSelectionRange(t.value.length, t.value.length); } catch (er) {}
+  });
+  document.addEventListener('paste', (e) => {
+    const t = e.target;
+    if (!(t.matches && t.matches('input.money'))) return;
+    const v = parseMonto((e.clipboardData || window.clipboardData).getData('text'));
+    if (isNaN(v)) return;
+    e.preventDefault();
+    t.value = (t.classList.contains('signed') && v < 0 ? '-' : '') + fmtNum(Math.abs(v));
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  document.addEventListener('focusin', (e) => {
+    const t = e.target;
+    if (t.matches && t.matches('input.money')) setTimeout(() => { try { t.setSelectionRange(t.value.length, t.value.length); } catch (er) {} }, 0);
   });
   document.addEventListener('focusout', (e) => {
     const t = e.target;
