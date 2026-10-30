@@ -545,7 +545,8 @@
     out.cuentas = (Array.isArray(s.cuentas) ? s.cuentas : []).filter((c) => c && c.id).map((c) => ({
       id: String(c.id), nombre: String(c.nombre || 'Cuenta'), tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'cheques',
       saldoInicial: num(c.saldoInicial), limite: Math.max(0, num(c.limite)), creado: c.creado || new Date().toISOString(),
-      historial: Array.isArray(c.historial) ? c.historial.filter((h) => h && /^\d{4}-\d{2}-\d{2}$/.test(h.f || '')).map((h) => ({ f: h.f, v: num(h.v) })).slice(-60) : []
+      historial: Array.isArray(c.historial) ? c.historial.filter((h) => h && /^\d{4}-\d{2}-\d{2}$/.test(h.f || '')).map((h) => ({ f: h.f, v: num(h.v) })).slice(-60) : [],
+      diaPago: Math.min(31, Math.max(0, Math.round(num(c.diaPago)))), diaCorte: Math.min(31, Math.max(0, Math.round(num(c.diaCorte))))
     }));
     const ids = new Set(out.cuentas.map((c) => c.id));
     out.categorias = Array.isArray(s.categorias) && s.categorias.length
@@ -1013,7 +1014,38 @@
     if (x.tipo === 'gasto') return x.cuentaId === id ? -x.monto : 0;
     if (x.tipo === 'ingreso') return x.cuentaId === id ? x.monto : 0;
     return (x.cuentaId === id ? -x.monto : 0) + (x.cuentaDestinoId === id ? x.monto : 0);
+  }  // ----- Tarjetas: fecha de pago, corte y cuánto falta -----
+  const fechaDia = (y, m, d) => { const dim = new Date(y, m + 1, 0).getDate(); return isoDe(new Date(y, m, Math.min(d, dim))); };
+  const partes = (iso) => { const d = parseISO(iso); return [d.getFullYear(), d.getMonth()]; };
+  function diaEnOAntes(dia, iso) { const [y, m] = partes(iso); const f = fechaDia(y, m, dia); return f <= iso ? f : fechaDia(y, m - 1, dia); }
+  function diaDespues(dia, iso) { const [y, m] = partes(iso); const f = fechaDia(y, m, dia); return f > iso ? f : fechaDia(y, m + 1, dia); }
+  function saldoAl(c, iso) { let v = c.saldoInicial; S.movimientos.forEach((x) => { if (x.fecha <= iso) v += efecto(x, c.id); }); return v; }
+  function abonosEntre(c, desde, hasta) { let t = 0; S.movimientos.forEach((x) => { if (x.fecha > desde && x.fecha <= hasta) { const e = efecto(x, c.id); if (e > 0) t += e; } }); return t; }
+  const diasHasta = (iso) => Math.round((parseISO(iso) - parseISO(hoyISO())) / 864e5);
+  function estadoTarjeta(c) {
+    if (!c || c.tipo !== 'tarjeta' || !c.diaPago) return null;
+    const hoy = hoyISO(), deudaHoy = Math.max(0, -saldoAl(c, '9999-12-31'));
+    if (c.diaCorte) {
+      const corte = diaEnOAntes(c.diaCorte, hoy), venc = diaDespues(c.diaPago, corte);
+      const total = Math.max(0, -saldoAl(c, corte)), abonado = abonosEntre(c, corte, hoy);
+      const porPagar = Math.max(0, total - abonado);
+      if (venc < hoy && porPagar <= 0.005) {
+        const corteSig = diaDespues(c.diaCorte, corte);
+        return { estado: 'pagada', venc: diaDespues(c.diaPago, corteSig), corteSig, total: 0, abonado: 0, porPagar: 0, deudaHoy };
+      }
+      return { estado: venc < hoy ? 'vencida' : porPagar <= 0.005 ? 'pagada' : 'pendiente', venc, corte, corteSig: diaDespues(c.diaCorte, corte), total, abonado, porPagar, deudaHoy };
+    }
+    const venc = c.diaPago && diaEnOAntes(c.diaPago, hoy) === hoy ? hoy : diaDespues(c.diaPago, hoy);
+    const abonado = abonosEntre(c, diaEnOAntes(c.diaPago, isoDe(new Date(parseISO(venc) - 864e5))), hoy);
+    return { estado: deudaHoy <= 0.005 ? 'pagada' : 'pendiente', venc, total: deudaHoy + abonado, abonado, porPagar: deudaHoy, deudaHoy };
   }
+  function textoTarjeta(e) {
+    const d = diasHasta(e.venc), cuando = d === 0 ? 'hoy' : d === 1 ? 'mañana' : `el ${fCorta(e.venc)} · en ${d} días`;
+    if (e.estado === 'vencida') return { t: `Venció el ${fCorta(e.venc)} · faltan ${money(e.porPagar)}`, c: 'neg' };
+    if (e.estado === 'pagada') return { t: `Pagada ✓ · próximo pago ${fCorta(e.venc)}`, c: 'pos' };
+    return { t: `Pagar ${money(e.porPagar)} ${d <= 1 ? cuando : 'antes del ' + fCorta(e.venc)}${e.abonado > 0.005 ? ` · abonaste ${money(e.abonado)}` : ''}`, c: d <= 3 ? 'warn' : '' };
+  }
+
   function filaMov(x, opt = {}) {
     const c = cat(x.categoriaId), cu = cuenta(x.cuentaId);
     let icono, titulo, sub, amt;
@@ -1067,6 +1099,12 @@
         <dl class="kv"><div><dt>${etiquetaIngreso(d.st.ing >= d.ip.v && d.ip.fuente !== 'manual' ? { fuente: 'real' } : d.ip)}</dt><dd>${money(d.ingresoBase)}</dd></div><div><dt>${d.am.neto > 0.005 ? (d.am.neto >= d.ahPlan - 0.005 ? 'Ahorrado este mes' : `Para ahorro · llevas ${money(d.am.neto)}`) : 'Separado para ahorro'}</dt><dd>${menos(d.ah)}</dd></div><div><dt>Ya gastaste</dt><dd>${menos(d.st.gas)}</dd></div>${d.pend > 0.005 ? `<div><dt>Préstamos por pagar</dt><dd>${menos(d.pend)}</dd></div>` : ''}${d.prog > 0.005 ? `<div><dt>Programados por venir</dt><dd>${menos(d.prog)}</dd></div>` : ''}</dl></section>`;
     }
 
+    const tjs = S.cuentas.map((c) => ({ c, e: estadoTarjeta(c) })).filter((x) => x.e).sort((a, b) => a.e.venc.localeCompare(b.e.venc));
+    if (tjs.length) html += `<section class="section"><div class="sh"><h2>Pagos de tarjeta</h2></div><div class="group">${tjs.map(({ c, e }) => {
+      const d = diasHasta(e.venc), urg = e.estado === 'vencida' ? 'red' : e.estado === 'pendiente' && d <= 3 ? 'orange' : e.estado === 'pagada' ? 'green' : 'orange';
+      const sub = e.estado === 'pagada' ? `Pagada · próximo pago ${fCorta(e.venc)}` : e.estado === 'vencida' ? `Venció el ${fCorta(e.venc)}` : `${cuandoTxt(e.venc)}${e.abonado > 0.005 ? ` · abonaste ${money(e.abonado)} de ${money(e.total)}` : ''}`;
+      return `<div class="row" style="cursor:default; flex-wrap:wrap; row-gap:8px"><span class="ic sq" style="--c:var(--c-${urg})">${e.estado === 'pagada' ? IC.check : IC.tarjeta}</span><span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2 ${e.estado === 'vencida' ? 'neg' : ''}">${esc(sub)}</span></span><span class="amt ${e.estado === 'vencida' ? 'neg' : ''}">${e.estado === 'pagada' ? money(0) : money(e.porPagar)}<small>${e.estado === 'pagada' ? 'por pagar' : e.corte ? 'del corte' : 'deuda total'}</small></span>${e.estado !== 'pagada' ? `<div style="width:100%; padding:0 0 4px 46px"><button class="btn small" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e.porPagar.toFixed(2)}">Pagar ${money(e.porPagar)}</button></div>` : ''}</div>`;
+    }).join('')}</div></section>`;
     const pc = porConfirmar();
     if (pc.length) html += `<section class="section"><div class="sh"><h2>Por confirmar</h2></div><div class="group">${pc.slice(0, 6).map(({ r, f }) => filaRec(r, f, true)).join('')}</div></section>`;
     const ag = agenda(30);
@@ -1243,7 +1281,7 @@
     if (c.tipo === 'tarjeta') {
       const deuda = Math.max(0, -v), uso = c.limite > 0 ? deuda / c.limite : 0;
       const col = uso > 0.7 ? 'red' : uso > 0.3 ? 'orange' : 'green';
-      return `<button class="row" type="button" data-act="editar-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt" style="gap:5px"><span class="t1">${esc(c.nombre)}</span><span class="t2">${c.limite > 0 ? `Usas ${Math.round(uso * 100)}% de ${money(c.limite)}` : 'Tarjeta de crédito'}${pendTxt}</span>${c.limite > 0 ? `<span class="bar" style="--c:var(--c-${col})"><i style="width:${Math.min(100, uso * 100).toFixed(1)}%"></i></span>` : ''}</span><span class="amt ${deuda > 0.005 ? 'neg' : ''}">${v > 0.005 ? money(v) : moneyAbs(deuda)}<small>${v > 0.005 ? 'a favor' : 'por pagar'}</small></span></button>`;
+      return `<button class="row" type="button" data-act="editar-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt" style="gap:5px"><span class="t1">${esc(c.nombre)}</span><span class="t2">${c.limite > 0 ? `Usas ${Math.round(uso * 100)}% de ${money(c.limite)}` : 'Tarjeta de crédito'}${pendTxt}</span>${c.limite > 0 ? `<span class="bar" style="--c:var(--c-${col})"><i style="width:${Math.min(100, uso * 100).toFixed(1)}%"></i></span>` : ''}${(() => { const e = estadoTarjeta(c); if (!e) return ''; const t = textoTarjeta(e); return `<span class="t2 ${t.c === 'neg' ? 'neg' : t.c === 'pos' ? 'pos' : ''}" style="white-space:normal${t.c === 'warn' ? ';color:var(--c-orange);font-weight:600' : ''}">${esc(t.t)}</span>`; })()}</span><span class="amt ${deuda > 0.005 ? 'neg' : ''}">${v > 0.005 ? money(v) : moneyAbs(deuda)}<small>${v > 0.005 ? 'a favor' : c.diaPago ? 'deuda total' : 'por pagar'}</small></span></button>`;
     }
     return `<button class="row" type="button" data-act="editar-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2">${t.n}${pendTxt}</span></span><span class="amt ${v < -0.005 ? 'neg' : ''}">${money(v)}</span></button>`;
   }
@@ -1380,7 +1418,7 @@
     const b = abrirSheet(`<form id="form-mov" novalidate>${cabeza(x ? 'Editar movimiento' : 'Nuevo movimiento')}
       <div style="display:grid; gap:18px">
       <div class="seg" role="group" aria-label="Tipo de movimiento"><button type="button" data-tipo="gasto">Gasto</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferencia</button></div>
-      <div class="monto"><span>$</span><input id="m-monto" class="money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${x ? fmtNum(x.monto) : ''}" autofocus></div>
+      <div class="monto"><span>$</span><input id="m-monto" class="money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${x ? fmtNum(x.monto) : preset.monto > 0 ? fmtNum(preset.monto) : ''}" autofocus></div>
       <div class="group">
         <div class="frow"><label for="m-nota">Descripción</label><input id="m-nota" type="text" autocapitalize="words" aria-autocomplete="list" value="${esc(notaIni)}" autocomplete="off"></div>
         <div class="frow"><label for="m-cuenta" id="l-cuenta">Cuenta</label><select id="m-cuenta">${opsCuenta(cuentaIni)}</select></div>
@@ -1604,19 +1642,21 @@
         <div class="frow"><label for="a-nombre">Nombre</label><input id="a-nombre" type="text" placeholder="Ej. Chase cheques" value="${c ? esc(c.nombre) : ''}" autocomplete="off" ${esRet ? '' : 'autofocus'}></div>
         <div class="frow"><label for="a-tipo">Tipo</label><select id="a-tipo">${Object.entries(TIPOS_CUENTA).map(([k, t]) => `<option value="${k}" ${(c ? c.tipo : 'cheques') === k ? 'selected' : ''}>${t.n}</option>`).join('')}</select></div>
         <div class="frow"><label for="a-saldo" id="l-saldo">Saldo actual</label><input id="a-saldo" class="money signed" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" ${esRet ? 'autofocus' : ''}></div>
+        <div class="frow" id="row-corte"><label for="a-corte">Día de corte</label><select id="a-corte">${[0, ...Array.from({ length: 31 }, (_, i) => i + 1)].map((d) => `<option value="${d}" ${(c ? c['diaCorte'] : 0) === d ? 'selected' : ''}>${d ? 'Día ' + d : 'Sin definir'}</option>`).join('')}</select></div>
+        <div class="frow" id="row-pago"><label for="a-pago">Día de pago</label><select id="a-pago">${[0, ...Array.from({ length: 31 }, (_, i) => i + 1)].map((d) => `<option value="${d}" ${(c ? c['diaPago'] : 0) === d ? 'selected' : ''}>${d ? 'Día ' + d : 'Sin definir'}</option>`).join('')}</select></div>
         <div class="frow" id="row-lim"><label for="a-lim">Límite de crédito</label><input id="a-lim" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${c && c.limite ? fmtNum(c.limite) : ''}"></div>
       </div>
       <p class="note" id="a-hint"></p>
       <p class="form-error" id="a-error" role="alert"></p>
       ${esRet && c.historial.length ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Últimas actualizaciones</p><div class="group">${c.historial.slice(-6).reverse().map((h, i, arr) => { const prev = arr[i + 1]; const d = prev ? h.v - prev.v : 0; return `<div class="row plain" style="cursor:default; min-height:48px"><span class="rt"><span class="t1">${esc(cap(parseISO(h.f).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })))}</span></span><span class="amt">${money(h.v)}${prev && Math.abs(d) > 0.005 ? `<small class="${d > 0 ? 'pos' : 'neg'}">${d > 0 ? '+' : '−'}${moneyAbs(d)}</small>` : ''}</span></div>`; }).join('')}</div></div>` : ''}
       ${esRet ? '<div class="sheet-actions"><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>' : ''}
-      ${c && !esRet ? `<div class="sheet-actions">${S.cuentas.filter((x) => x.tipo !== 'retiro').length > 1 ? (c.tipo === 'tarjeta' ? `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}">Pagar esta tarjeta</button>` : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
+      ${c && !esRet ? `<div class="sheet-actions">${S.cuentas.filter((x) => x.tipo !== 'retiro').length > 1 ? (c.tipo === 'tarjeta' ? (() => { const e = estadoTarjeta(c); return `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e && e.porPagar > 0.005 ? e.porPagar.toFixed(2) : ''}">Pagar esta tarjeta${e && e.porPagar > 0.005 ? ' · ' + money(e.porPagar) : ''}</button>`; })() : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
     </div></form>`);
     const pintar = () => {
       const esT = $('#a-tipo', b).value === 'tarjeta', esR = $('#a-tipo', b).value === 'retiro';
-      $('#row-lim', b).hidden = !esT;
+      $('#row-lim', b).hidden = !esT; $('#row-corte', b).hidden = !esT; $('#row-pago', b).hidden = !esT;
       $('#l-saldo', b).textContent = esT ? 'Deuda actual' : 'Saldo actual';
-      $('#a-hint', b).textContent = esR ? 'Cuando revises tu cuenta de retiro, escribe aquí el saldo nuevo. No lleva movimientos diarios; el saldo se suma a lo que tienes y a tu patrimonio.' : esT ? 'Escribe lo que debes hoy en la tarjeta. Los gastos con tarjeta suben la deuda y los pagos (transferencias) la bajan.' : 'Escribe lo que tienes hoy en la cuenta. Si después no coincide con tu banco, aquí lo corriges.';
+      $('#a-hint', b).textContent = esR ? 'Cuando revises tu cuenta de retiro, escribe aquí el saldo nuevo. No lleva movimientos diarios; el saldo se suma a lo que tienes y a tu patrimonio.' : esT ? 'Escribe lo que debes hoy en la tarjeta. Los gastos con tarjeta suben la deuda y los pagos (transferencias) la bajan. Con el día de pago la app te avisa cuánto pagar y cuándo; con el día de corte separa lo que compraste después del corte, que se paga hasta el siguiente mes.' : 'Escribe lo que tienes hoy en la cuenta. Si después no coincide con tu banco, aquí lo corriges.';
     };
     const valIni = c ? (c.tipo === 'tarjeta' ? -actual : actual) : 0;
     $('#a-saldo', b).value = c ? fmtNum(valIni) : '';
@@ -1630,12 +1670,13 @@
       if (isNaN(v)) { $('#a-error', b).textContent = 'Revisa el saldo: solo números.'; return; }
       const deseado = tipo === 'tarjeta' ? -v : v;
       const lim = tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-lim', b).value) || 0) : 0;
+      const diaPago = tipo === 'tarjeta' ? +$('#a-pago', b).value : 0, diaCorte = tipo === 'tarjeta' ? +$('#a-corte', b).value : 0;
       const hist = c ? c.historial.slice() : [];
       if (tipo === 'retiro' && (!hist.length || Math.abs(hist[hist.length - 1].v - deseado) > 0.004)) {
         if (hist.length && hist[hist.length - 1].f === hoyISO()) hist[hist.length - 1].v = deseado; else hist.push({ f: hoyISO(), v: deseado });
       }
-      if (c) { Object.assign(c, { nombre, tipo, limite: lim, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
-      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, creado: new Date().toISOString(), historial: hist });
+      if (c) { Object.assign(c, { nombre, tipo, limite: lim, diaPago, diaCorte, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
+      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, diaPago, diaCorte, creado: new Date().toISOString(), historial: hist });
       guardar(); cerrarSheet(); toast(c ? (tipo === 'retiro' ? 'Saldo actualizado' : 'Cuenta actualizada') : 'Cuenta agregada'); render();
     });
     if (c) {
@@ -1996,7 +2037,7 @@
   const ACC = {
     'tab': (t) => ir(t.dataset.v),
     'nuevo-mov': (t) => sheetMov(null, t.dataset.tipo),
-    'transferir': (t) => sheetMov(null, 'transferencia', { desde: t.dataset.desde, hacia: t.dataset.hacia }), 'editar-mov': (t) => sheetMov(t.dataset.id),
+    'transferir': (t) => sheetMov(null, 'transferencia', { desde: t.dataset.desde, hacia: t.dataset.hacia, monto: +t.dataset.monto || 0 }), 'editar-mov': (t) => sheetMov(t.dataset.id),
     'nueva-cuenta': () => sheetCuenta(null), 'editar-cuenta': (t) => sheetCuenta(t.dataset.id),
     'nueva-cat': (t) => sheetCat(null, t.dataset.tipo), 'editar-cat': (t) => sheetCat(t.dataset.id),
     'nueva-meta': () => sheetMeta(null), 'editar-meta': (t) => sheetMeta(t.dataset.id),
