@@ -272,7 +272,10 @@
   td.sal { font-weight: 600; }
   tfoot td { position: sticky; bottom: 0; background: var(--card); border-top: .5px solid var(--sep); padding: 10px 12px; font-weight: 600; text-align: right; white-space: nowrap; }
   tfoot td:first-child { text-align: left; }
-  input.abono { width: 118px; text-align: right; font: 500 16px var(--font); padding: 6px 8px; border: 0; border-radius: 8px; background: var(--fill); color: var(--label); }
+  .abono-wrap { position: relative; display: inline-block; }
+  .abono-wrap::before { content: '$'; position: absolute; left: 9px; top: 50%; transform: translateY(-50%); font: 500 15px var(--font); color: var(--muted); pointer-events: none; }
+  .abono-wrap:has(.abono.tiene)::before { color: var(--pos); }
+  input.abono { width: 118px; text-align: right; font: 500 16px var(--font); padding: 6px 8px 6px 20px; border: 0; border-radius: 8px; background: var(--fill); color: var(--label); }
   input.abono.tiene { background: rgba(52, 199, 89, .18); color: var(--pos); font-weight: 600; }
   input.abono:disabled { opacity: .4; }
   .tlegend { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--label-2); }
@@ -1318,7 +1321,7 @@
   function montarDetalle() {
     const p = S.prestamos.find((x) => x.id === prestAbierto); if (!p) return;
     const a = amortizar(p);
-    $('#tbody').innerHTML = a.rows.map((r) => `<tr id="r-${r.m}"><td>${r.m}</td><td>${fFecha(r.fecha)}</td><td class="pago"></td><td class="cap"></td><td class="int"></td><td><input class="abono money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" data-m="${r.m}" aria-label="Abono extra del pago ${r.m}"></td><td class="sal"></td></tr>`).join('');
+    $('#tbody').innerHTML = a.rows.map((r) => `<tr id="r-${r.m}"><td>${r.m}</td><td>${fFecha(r.fecha)}</td><td class="pago"></td><td class="cap"></td><td class="int"></td><td><span class="abono-wrap"><input class="abono money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" data-m="${r.m}" aria-label="Abono extra del pago ${r.m}"></span></td><td class="sal"></td></tr>`).join('');
     filas = [null];
     a.rows.forEach((r) => { const tr = document.getElementById('r-' + r.m); filas.push({ tr, pago: tr.querySelector('.pago'), cap: tr.querySelector('.cap'), int: tr.querySelector('.int'), sal: tr.querySelector('.sal'), inp: tr.querySelector('input') }); });
     actualizarDetalle();
