@@ -1354,7 +1354,7 @@
       <div class="seg" role="group" aria-label="Tipo de movimiento"><button type="button" data-tipo="gasto">Gasto</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferencia</button></div>
       <div class="monto"><span>$</span><input id="m-monto" class="money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${x ? fmtNum(x.monto) : ''}" autofocus></div>
       <div class="group">
-        <div class="frow"><label for="m-nota">Descripción</label><input id="m-nota" type="text" placeholder="Ej. Tremendo Taco" autocapitalize="words" aria-autocomplete="list" value="${esc(notaIni)}" autocomplete="off"></div>
+        <div class="frow"><label for="m-nota">Descripción</label><input id="m-nota" type="text" autocapitalize="words" aria-autocomplete="list" value="${esc(notaIni)}" autocomplete="off"></div>
         <div class="frow"><label for="m-cuenta" id="l-cuenta">Cuenta</label><select id="m-cuenta">${opsCuenta(cuentaIni)}</select></div>
         <div class="frow" id="row-dest"><label for="m-dest">Hacia</label><select id="m-dest">${opsCuenta(destIni)}</select></div>
         <div class="frow" id="row-cat"><label for="m-cat">Categoría</label><select id="m-cat"></select></div>
