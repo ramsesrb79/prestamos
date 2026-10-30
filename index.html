@@ -2183,17 +2183,17 @@
     if (t.value.trim() === '') return;
     const v = parseMonto(t.value); t.value = isNaN(v) ? '' : fmtNum(v);
   });
-  document.addEventListener('change', (e) => {
-    const inp = e.target;
-    if (!(inp.matches && inp.matches('input.abono'))) return;
+  function guardarAbono(inp, reformatear) {
     const p = S.prestamos.find((x) => x.id === prestAbierto); if (!p) return;
     const v = parseMonto(inp.value);
-    inp.value = v > 0 ? fmtNum(v) : '';
+    if (reformatear) inp.value = v > 0 ? fmtNum(v) : '';
     const extras = { ...p.extras };
     if (v > 0) extras[inp.dataset.m] = Math.round(v * 100) / 100; else delete extras[inp.dataset.m];
     p.extras = extras;
     guardar(); actualizarDetalle();
-  });
+  }
+  document.addEventListener('input', (e) => { if (e.target.matches && e.target.matches('input.abono')) guardarAbono(e.target, false); });
+  document.addEventListener('change', (e) => { if (e.target.matches && e.target.matches('input.abono')) guardarAbono(e.target, true); });
   window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VISTAS[v] && v !== vista) { vista = v; prestAbierto = null; render(); } });
 
   // Sin zoom: evita el pellizco y el doble toque en iPhone/iPad
