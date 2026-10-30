@@ -351,6 +351,10 @@
   .sheet .pad .pad-fn { background: none; }
   @media (max-height: 680px) { .pad { grid-template-columns: repeat(3, 64px); gap: 10px 20px; } .pad button { width: 64px; height: 64px; font-size: 28px; } }
   .frow .lbl-w { width: auto; flex: 1; }
+  .pass-wrap { position: relative; }
+  .pass-wrap .field-pass { padding-right: 84px; }
+  .pass-ver { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; color: var(--tint); font: 400 15px var(--font); padding: 8px 10px; cursor: pointer; }
+  .clave-ver { font: 600 22px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--sheet-card); border-radius: 10px; padding: 16px; word-break: break-all; text-align: center; user-select: text; -webkit-user-select: text; }
   .field-pass { width: 100%; font: 400 17px var(--font); color: var(--label); background: var(--sheet-card); border: 0; border-radius: 10px; padding: 13px 16px; }
   .aviso { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   .aviso-btns { display: flex; gap: 14px; align-items: center; margin-left: auto; }
@@ -1826,6 +1830,7 @@
         ${lk && bioOk ? `<div class="frow"><label for="z-bio" class="lbl-w">Usar Face ID o Touch ID</label><input id="z-bio" class="switch" type="checkbox" ${lk.bio ? 'checked' : ''}></div>` : ''}
         ${lk ? `<button class="row plain" type="button" id="z-cambiar"><span class="rt"><span class="t1" style="color:var(--tint)">Cambiar código</span></span></button><button class="row plain" type="button" id="z-ahora"><span class="rt"><span class="t1" style="color:var(--tint)">Bloquear ahora</span></span></button>` : ''}
         <button class="row plain" type="button" id="z-clave"><span class="rt"><span class="t1">Contraseña de las copias</span><span class="t2">${S.config.claveCopia ? 'Lista. Tus copias se guardan cifradas.' : 'Crea una para cifrar tus copias'}</span></span><span class="amt" style="color:var(--tint)">${S.config.claveCopia ? 'Cambiar' : 'Crear'}</span></button>
+        ${S.config.claveCopia ? '<button class="row plain" type="button" id="z-verclave"><span class="rt"><span class="t1" style="color:var(--tint)">Ver contraseña de las copias</span></span></button>' : ''}
       </div><p class="note">${lk ? 'La app se bloquea al abrirla y cuando la dejas más de un minuto. Tus datos están cifrados con tu código.' : 'Con el bloqueo, la app pide tu código al abrirse y tus datos se guardan cifrados en el dispositivo.'}</p></div>` : '<p class="note">El bloqueo y las copias cifradas funcionan cuando abres la app desde su dirección web (https).</p>'}
       <button class="btn block destructive" type="button" data-act="borrar-todo">Borrar todos los datos</button>
     </div>`);
@@ -1837,6 +1842,7 @@
     if (bio) bio.addEventListener('change', async (e) => { if (e.target.checked) await activarBio(); else { await desactivarBio(); toast('Face ID desactivado'); } sheetAjustes(); });
     if (lk) { $('#z-cambiar', b).addEventListener('click', () => sheetPin('cambiar')); $('#z-ahora', b).addEventListener('click', () => bloquearAhora()); }
     $('#z-clave', b).addEventListener('click', () => sheetClaveCopia(false));
+    if ($('#z-verclave', b)) $('#z-verclave', b).addEventListener('click', () => sheetVerClave());
     return b;
   }
   async function sheetSnaps() {
@@ -1898,8 +1904,8 @@
   function sheetClaveCopia(despuesGuardar) {
     const b = abrirSheet(`<form id="form-clave" novalidate>${cabeza(S.config.claveCopia ? 'Cambiar contraseña' : 'Contraseña de las copias')}<div style="display:grid; gap:14px">
       <p class="note" style="margin:0">Tus copias se guardan cifradas con esta contraseña. La necesitarás para abrirlas en otro dispositivo. Usa al menos 8 caracteres y guárdala en un lugar seguro: sin ella, la copia no se puede abrir.</p>
-      <input id="c-pass" class="field-pass" type="password" placeholder="Contraseña" autocomplete="new-password" autofocus>
-      <input id="c-pass2" class="field-pass" type="password" placeholder="Repite la contraseña" autocomplete="new-password">
+      ${campoClave('c-pass', 'Contraseña', true)}
+      ${campoClave('c-pass2', 'Repite la contraseña')}
       <p class="form-error" id="c-error" role="alert"></p>
     </div></form>`);
     $('#form-clave', b).addEventListener('submit', (e) => {
@@ -1912,17 +1918,36 @@
       if (despuesGuardar) { sheetAjustes(); toast('Contraseña lista. Toca «Guardar copia».'); } else sheetAjustes();
     });
   }
-  function sheetPedirClave(probar, alAbrir) {
+  function campoClave(id, ph, foco) {
+    return `<div class="pass-wrap"><input id="${id}" class="field-pass" type="password" placeholder="${ph}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" ${foco ? 'autofocus' : ''}><button class="pass-ver" type="button" data-ver="${id}">Mostrar</button></div>`;
+  }
+  document.addEventListener('click', (e) => {
+    const bt = e.target.closest('[data-ver]'); if (!bt) return;
+    const inp = document.getElementById(bt.dataset.ver); if (!inp) return;
+    const ver = inp.type === 'password'; inp.type = ver ? 'text' : 'password'; bt.textContent = ver ? 'Ocultar' : 'Mostrar';
+  });
+  function sheetVerClave() {
+    const b = abrirSheet(`<div class="sheet-head"><button class="link" type="button" id="vc-back">Ajustes</button><h2>Contraseña de las copias</h2><span></span></div><div style="display:grid; gap:14px">
+      <div class="clave-ver">${esc(S.config.claveCopia)}</div>
+      <p class="note" style="margin:0">Es la que pide «Abrir copia» en otro dispositivo. Fíjate en mayúsculas, espacios y acentos: deben ser exactamente iguales. Las copias que guardaste antes de cambiarla se abren con la contraseña anterior.</p>
+    </div>`);
+    $('#vc-back', b).addEventListener('click', () => sheetAjustes());
+  }
+  function sheetPedirClave(probar, alAbrir, fecha) {
+    const cuando = fecha && !isNaN(new Date(fecha)) ? ` del ${new Date(fecha).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}` : '';
     const b = abrirSheet(`<form id="form-abrir" novalidate>${cabeza('Abrir copia cifrada')}<div style="display:grid; gap:14px">
-      <p class="note" style="margin:0">Escribe la contraseña con la que guardaste esta copia.</p>
-      <input id="o-pass" class="field-pass" type="password" placeholder="Contraseña de la copia" autocomplete="current-password" autofocus>
+      <p class="note" style="margin:0">Escribe la contraseña con la que guardaste esta copia${cuando}.</p>
+      ${campoClave('o-pass', 'Contraseña de la copia', true)}
       <p class="form-error" id="o-error" role="alert"></p>
+      <p class="note" id="o-ayuda" style="margin:0" hidden>¿No la recuerdas? En el dispositivo donde guardaste la copia ve a Ajustes › «Ver contraseña de las copias». Si la cambiaste después de guardar esta copia, usa la anterior.</p>
     </div></form>`);
     $('#form-abrir', b).addEventListener('submit', async (e) => {
       e.preventDefault();
+      const pass = $('#o-pass', b).value;
+      if (!pass) { $('#o-error', b).textContent = 'Escribe la contraseña.'; return; }
       $('#o-error', b).textContent = ''; const btn = b.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = 'Abriendo…';
-      try { const datos = await probar($('#o-pass', b).value); cerrarSheet(); alAbrir(datos); }
-      catch (er) { $('#o-error', b).textContent = 'Contraseña incorrecta o copia dañada.'; btn.disabled = false; btn.textContent = 'Guardar'; }
+      try { const datos = await probar(pass); cerrarSheet(); alAbrir(datos); }
+      catch (er) { $('#o-error', b).textContent = 'La contraseña no coincide con la de esta copia.'; $('#o-ayuda', b).hidden = false; btn.disabled = false; btn.textContent = 'Abrir'; }
     });
     b.querySelector('[type=submit]').textContent = 'Abrir';
   }
@@ -2020,7 +2045,22 @@
       };
       if (d && d.cifrado && typeof d.datos === 'string') {
         if (!cifradoOk) { toast('Abre la app desde su dirección web para abrir copias cifradas.'); return; }
-        sheetPedirClave(async (pass) => { const k = await derivar(pass, unb64(d.cifrado.salt), d.cifrado.iter || ITER_COPIA); return descifrar(k, d.cifrado.iv, d.datos); }, (datos) => { aplicar(datos); });
+        let salt;
+        try { salt = unb64(d.cifrado.salt); const iv = unb64(d.cifrado.iv), ct = unb64(d.datos); if (salt.length < 8 || iv.length !== 12 || ct.length < 17) throw new Error('corta'); }
+        catch (e) { toast('Esta copia está incompleta o dañada. Prueba con otra copia.'); return; }
+        const iter = d.cifrado.iter || ITER_COPIA;
+        const una = async (pass) => descifrar(await derivar(pass, salt, iter), d.cifrado.iv, d.datos);
+        const probar = async (pass) => {
+          const t = pass.trim();
+          const vars = [...new Set([pass, t, t.charAt(0).toLowerCase() + t.slice(1), t.charAt(0).toUpperCase() + t.slice(1)])].filter(Boolean);
+          for (const v of vars) { try { return await una(v); } catch (e) {} }
+          throw new Error('clave');
+        };
+        if (S.config.claveCopia) {
+          toast('Abriendo copia…');
+          try { const datos = await una(S.config.claveCopia); aplicar(datos); return; } catch (e) {}
+        }
+        sheetPedirClave(probar, (datos) => { aplicar(datos); }, d.fecha);
         return;
       }
       if (d && d.datos && typeof d.datos === 'object') { await aplicar(d.datos); return; }
