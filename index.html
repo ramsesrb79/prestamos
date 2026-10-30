@@ -1142,8 +1142,10 @@
     const prom = promediosCat(ym);
     const limDe = (c) => limiteDe(c, prom, cuotas);
     const presDe = (c) => limDe(c).v;
-    const porGrupo = (g) => suma(gastos.filter((c) => c.grupo === g).map(presDe));
-    const nec = porGrupo('necesidades'), gus = porGrupo('gustos'), deu = porGrupo('deuda');
+    // Cada categoría cuenta su límite o lo que ya gastaste, lo que sea mayor (así entra todo lo registrado)
+    const porGrupo = (g) => suma(gastos.filter((c) => c.grupo === g).map((c) => Math.max(presDe(c), st.porCat[c.id] || 0)));
+    const sinCat = st.porCat._g || 0;
+    const nec = porGrupo('necesidades'), gus = porGrupo('gustos') + sinCat, deu = porGrupo('deuda');
     const amP = ahorroMes(ym), ahV = Math.max(pa.plan, amP.neto);
     const asignado = nec + gus + deu + ahV, libre = ing - asignado;
     let html = encabezado('Presupuesto', '', `<button class="btn small tinted" type="button" data-act="categorias">Categorías</button><button class="btn small tinted" type="button" data-act="config-pres">Ingreso y ahorro</button>`) + mnav('mes-pres', ym);
@@ -1167,6 +1169,7 @@
         <div class="stack" style="margin-top:10px">${segs.filter((s) => s[1] > 0).map((s) => `<i style="--c:var(--c-${s[2]});width:${(s[1] / base * 100).toFixed(2)}%"></i>`).join('')}</div>
         <div class="legend">${segs.map((s) => `<div style="--c:var(--c-${s[2]})"><b></b><span>${s[0]}</span><em>${pct(s[1] / ing * 100)}</em><strong>${money(s[1])}</strong></div>`).join('')}
           <div style="--c:var(--${libre < -0.005 ? 'neg' : 'fill-2'})"><b></b><span>${libre < -0.005 ? 'Te pasas de tu ingreso' : 'Sin asignar'}</span><em>${pct(Math.abs(libre) / ing * 100)}</em><strong class="${libre < -0.005 ? 'neg' : ''}">${money(libre)}</strong></div></div>
+        <p class="muted" style="font-size:13px; margin-top:10px">Cada categoría cuenta con su límite, o con lo que ya gastaste si es más. ${sinCat > 0.005 ? `Los ${money(sinCat)} sin categoría van en Gustos.` : ''}</p>
         <div class="guide"><p class="muted" style="font-size:13px">Guía 50/30/20 para tu ingreso</p>${guia.map(([n, v, f, modo]) => { const lim = ing * f, ok = modo === 'hasta' ? v <= lim + 0.005 : v >= lim - 0.005; return `<div><span>${n}: ${modo} ${money(lim)}</span><span class="${ok ? 'ok' : 'bad'}">${ok ? (n === 'Ahorro' && amP.neto > 0.005 ? 'Vas bien · llevas ' + money(amP.neto) : 'Vas bien') : modo === 'hasta' ? 'Te pasas ' + money(v - lim) : 'Faltan ' + money(lim - v)}</span></div>`; }).join('')}</div></section>`;
     }
 
