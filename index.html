@@ -557,7 +557,7 @@
       : categoriasBase();
     if (!out.categorias.some((c) => c.id === CAT_PREST)) out.categorias.push(categoriasBase().find((c) => c.id === CAT_PREST));
     out.movimientos = (Array.isArray(s.movimientos) ? s.movimientos : []).filter((m) => m && m.id && ids.has(m.cuentaId)).map((m) => {
-      const tipo = ['gasto', 'ingreso', 'transferencia'].includes(m.tipo) ? m.tipo : 'gasto';
+      const tipo = ['gasto', 'ingreso', 'transferencia', 'devolucion'].includes(m.tipo) ? m.tipo : 'gasto';
       return { id: String(m.id), tipo, monto: Math.abs(num(m.monto)), cuentaId: m.cuentaId, cuentaDestinoId: tipo === 'transferencia' && ids.has(m.cuentaDestinoId) ? m.cuentaDestinoId : null, categoriaId: tipo === 'transferencia' ? null : (m.categoriaId || null), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : hoyISO(), nota: String(m.nota || ''), posteado: !!m.posteado, recurrenteId: m.recurrenteId ? String(m.recurrenteId) : null, creado: m.creado || new Date().toISOString() };
     }).filter((m) => m.tipo !== 'transferencia' || m.cuentaDestinoId);
     out.metas = (Array.isArray(s.metas) ? s.metas : []).filter((m) => m && m.id).map((m) => ({ id: String(m.id), nombre: String(m.nombre || 'Meta'), objetivo: Math.max(0, num(m.objetivo)), ahorrado: Math.max(0, num(m.ahorrado)), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : '', color: PALETA.includes(m.color) ? m.color : 'green' }));
@@ -827,7 +827,7 @@
     S.movimientos.forEach((x) => {
       if (!(x.cuentaId in m)) return;
       if (x.tipo === 'gasto') m[x.cuentaId] -= x.monto;
-      else if (x.tipo === 'ingreso') m[x.cuentaId] += x.monto;
+      else if (x.tipo === 'ingreso' || x.tipo === 'devolucion') m[x.cuentaId] += x.monto;
       else { m[x.cuentaId] -= x.monto; if (x.cuentaDestinoId in m) m[x.cuentaDestinoId] += x.monto; }
     });
     return m;
@@ -837,6 +837,7 @@
     S.movimientos.forEach((x) => {
       if (x.fecha.slice(0, 7) !== ym || x.tipo === 'transferencia') return;
       const k = x.categoriaId || (x.tipo === 'ingreso' ? '_i' : '_g');
+      if (x.tipo === 'devolucion') { porCat[k] = (porCat[k] || 0) - x.monto; gas -= x.monto; return; }
       porCat[k] = (porCat[k] || 0) + x.monto;
       if (x.tipo === 'ingreso') ing += x.monto; else gas += x.monto;
     });
@@ -1012,7 +1013,7 @@
   // efecto de un movimiento sobre una cuenta (para saldos y saldo corrido)
   function efecto(x, id) {
     if (x.tipo === 'gasto') return x.cuentaId === id ? -x.monto : 0;
-    if (x.tipo === 'ingreso') return x.cuentaId === id ? x.monto : 0;
+    if (x.tipo === 'ingreso' || x.tipo === 'devolucion') return x.cuentaId === id ? x.monto : 0;
     return (x.cuentaId === id ? -x.monto : 0) + (x.cuentaDestinoId === id ? x.monto : 0);
   }  // ----- Tarjetas: fecha de pago, corte y cuánto falta -----
   const fechaDia = (y, m, d) => { const dim = new Date(y, m + 1, 0).getDate(); return isoDe(new Date(y, m, Math.min(d, dim))); };
@@ -1057,10 +1058,10 @@
       if (opt.cuenta) { const e = efecto(x, opt.cuenta); amt = `<span class="amt ${e > 0 ? 'pos' : ''}">${e > 0 ? '+' : '−'}${moneyAbs(x.monto)}`; }
       else amt = `<span class="amt muted">${moneyAbs(x.monto)}`;
     } else {
-      const ing = x.tipo === 'ingreso';
+      const ing = x.tipo === 'ingreso' || x.tipo === 'devolucion';
       icono = icCat(c);
-      titulo = x.nota || (c ? c.nombre : 'Sin categoría');
-      sub = (x.nota && c ? c.nombre + ' · ' : '') + (cu ? cu.nombre : '');
+      titulo = x.nota || (x.tipo === 'devolucion' ? 'Devolución' : c ? c.nombre : 'Sin categoría');
+      sub = (x.tipo === 'devolucion' ? 'Devolución · ' : '') + (x.nota && c ? c.nombre + ' · ' : '') + (cu ? cu.nombre : '');
       amt = `<span class="amt ${ing ? 'pos' : ''}">${ing ? '+' : '−'}${moneyAbs(x.monto)}`;
     }
     if (opt.run != null) amt += `<small class="${opt.run < -0.005 ? 'neg' : ''}">${money(opt.run)}</small>`;
@@ -1153,7 +1154,7 @@
       return;
     }
     const ing = suma(lista.filter((x) => x.tipo === 'ingreso').map((x) => x.monto));
-    const gas = suma(lista.filter((x) => x.tipo === 'gasto').map((x) => x.monto));
+    const gas = suma(lista.filter((x) => x.tipo === 'gasto').map((x) => x.monto)) - suma(lista.filter((x) => x.tipo === 'devolucion').map((x) => x.monto));
     let run = null, extra = '';
     if (filtro.cuenta && cuenta(filtro.cuenta)) {
       const c = cuenta(filtro.cuenta), id = c.id, esT = c.tipo === 'tarjeta';
@@ -1408,7 +1409,7 @@
       return;
     }
     const x = id ? S.movimientos.find((m) => m.id === id) : null;
-    let tipo = x ? x.tipo : (['gasto', 'ingreso', 'transferencia'].includes(tipoIni) ? tipoIni : 'gasto');
+    let tipo = x ? x.tipo : (['gasto', 'ingreso', 'transferencia', 'devolucion'].includes(tipoIni) ? tipoIni : 'gasto');
     const opsCuenta = (sel) => CM.map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     const noTarj = CM.find((c) => c.tipo === 'cheques') || CM.find((c) => c.tipo !== 'tarjeta') || CM[0];
     let cuentaIni = x ? x.cuentaId : (preset.desde && cuenta(preset.desde) ? preset.desde : (filtro.cuenta && cuenta(filtro.cuenta) ? filtro.cuenta : noTarj.id));
@@ -1417,7 +1418,7 @@
     const notaIni = x ? x.nota : (preset.hacia && cuenta(preset.hacia) && cuenta(preset.hacia).tipo === 'tarjeta' ? 'Pago de ' + cuenta(preset.hacia).nombre : '');
     const b = abrirSheet(`<form id="form-mov" novalidate>${cabeza(x ? 'Editar movimiento' : 'Nuevo movimiento')}
       <div style="display:grid; gap:18px">
-      <div class="seg" role="group" aria-label="Tipo de movimiento"><button type="button" data-tipo="gasto">Gasto</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferencia</button></div>
+      <div class="seg" role="group" aria-label="Tipo de movimiento"><button type="button" data-tipo="gasto">Gasto</button><button type="button" data-tipo="ingreso">Ingreso</button><button type="button" data-tipo="transferencia">Transferir</button><button type="button" data-tipo="devolucion">Devolución</button></div>
       <div class="monto"><span>$</span><input id="m-monto" class="money" type="text" inputmode="numeric" autocomplete="off" placeholder="0.00" aria-label="Cantidad" value="${x ? fmtNum(x.monto) : preset.monto > 0 ? fmtNum(preset.monto) : ''}" autofocus></div>
       <div class="group">
         <div class="frow"><label for="m-nota">Descripción</label><input id="m-nota" type="text" autocapitalize="words" aria-autocomplete="list" value="${esc(notaIni)}" autocomplete="off"></div>
@@ -1437,13 +1438,14 @@
       b.querySelectorAll('.seg button').forEach((bt) => bt.classList.toggle('on', bt.dataset.tipo === tipo));
       $('#row-dest', b).hidden = tipo !== 'transferencia';
       $('#row-cat', b).hidden = tipo === 'transferencia';
-      $('#l-cuenta', b).textContent = tipo === 'transferencia' ? 'Desde' : tipo === 'ingreso' ? 'A la cuenta' : 'Pagado con';
+      $('#l-cuenta', b).textContent = tipo === 'transferencia' ? 'Desde' : tipo === 'ingreso' ? 'A la cuenta' : tipo === 'devolucion' ? 'Regresa a' : 'Pagado con';
       const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto';
       const sel = forzar || (x && x.tipo === tipo ? x.categoriaId : $('#m-cat', b).value);
       const lista = S.categorias.filter((c) => c.tipo === tc);
       $('#m-cat', b).innerHTML = '<option value="">Sin categoría</option>' + lista.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('') + '<option value="__nueva">+ Nueva categoría…</option>';
       $('#m-cat', b).value = lista.some((c) => c.id === sel) ? sel : (lista[0] ? lista[0].id : '');
-      $('#m-hint', b).textContent = tipo !== 'transferencia' ? '' : CM.length < 2 ? 'Para transferir necesitas al menos dos cuentas. Agrega otra en Cuentas.' : 'El dinero sale de una cuenta y entra a la otra, así que no cuenta como gasto ni como ingreso. Úsalo para pagar tu tarjeta o mover dinero a tu ahorro.';
+      { const rr = $('#m-rep', b); if (rr) { rr.closest('.frow').hidden = tipo === 'devolucion'; if (tipo === 'devolucion') rr.value = ''; } }
+      $('#m-hint', b).textContent = tipo === 'devolucion' ? 'Para cuando te regresan dinero de una compra. Baja la deuda de la tarjeta (o regresa a tu cuenta) y se resta del gasto de la categoría; no cuenta como ingreso.' : tipo !== 'transferencia' ? '' : CM.length < 2 ? 'Para transferir necesitas al menos dos cuentas. Agrega otra en Cuentas.' : 'El dinero sale de una cuenta y entra a la otra, así que no cuenta como gasto ni como ingreso. Úsalo para pagar tu tarjeta o mover dinero a tu ahorro.';
     };
     pintar();
     b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
@@ -1471,7 +1473,7 @@
         const q = notaInp.value.trim().toLowerCase();
         if (!q) { sug.hidden = true; return; }
         hist = hist || historial();
-        lista = hist.filter((e) => e.x.tipo === tipo && e.n.toLowerCase() !== q && e.n.toLowerCase().includes(q))
+        lista = hist.filter((e) => (e.x.tipo === tipo || (tipo === 'devolucion' && e.x.tipo === 'gasto')) && e.n.toLowerCase() !== q && e.n.toLowerCase().includes(q))
           .sort((a, c) => (c.n.toLowerCase().startsWith(q) - a.n.toLowerCase().startsWith(q)) || c.cnt - a.cnt || c.last.localeCompare(a.last)).slice(0, 5);
         if (!lista.length) { sug.hidden = true; return; }
         sug.innerHTML = lista.map((e, i) => { const c = cat(e.x.categoriaId); return `<button type="button" class="sug-i" role="option" data-i="${i}">${e.x.tipo === 'transferencia' ? `<span class="ic" style="--c:var(--c-gray)">${IC.flechas}</span>` : icCat(c)}<span class="rt"><span class="t1">${resaltar(e.n, q)}</span><span class="t2">${esc([c ? c.nombre : '', e.cnt + (e.cnt === 1 ? ' vez' : ' veces'), 'última ' + moneyAbs(e.x.monto)].filter(Boolean).join(' · '))}</span></span></button>`; }).join('');
