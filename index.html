@@ -308,6 +308,13 @@
   .colors label:has(input:checked) { box-shadow: 0 0 0 2px var(--sheet-bg), 0 0 0 4px var(--c); }
   .colors label:has(input:focus-visible) { outline: 3px solid var(--tint); outline-offset: 4px; }
   .form-error { color: var(--neg); font-size: 15px; min-height: 1px; text-align: center; }
+  .sug { display: grid; border-top: .5px solid var(--sep); }
+  .sug-i { display: flex; gap: 12px; align-items: center; width: 100%; padding: 8px 16px; background: none; border: 0; text-align: left; cursor: pointer; color: var(--label); font: inherit; }
+  .sug-i + .sug-i { border-top: .5px solid var(--sep); }
+  .sug-i:active, .sug-i:hover { background: var(--fill); }
+  .sug-i .ic { width: 28px; height: 28px; font-size: 13px; }
+  .sug-i .t1 { font-size: 16px; }
+  .sug-i b { font-weight: 700; }
   .form-error:empty { display: none; }
   .sheet .note { padding-top: 0; margin-top: -10px; }
   .sheet-actions { display: grid; gap: 10px; }
@@ -1073,7 +1080,7 @@
     const opsC = S.cuentas.filter((c) => c.tipo !== 'retiro').map((c) => `<option value="${c.id}" ${filtro.cuenta === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     const opsK = S.categorias.map((c) => `<option value="${c.id}" ${filtro.cat === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     return encabezado('Movimientos', '', `<button class="btn small tinted" type="button" data-act="programados">Programados${S.recurrentes.length ? ' · ' + S.recurrentes.length : ''}</button>${btnMas('nuevo-mov', 'Nuevo movimiento')}`) + mnav('mes-mov', mesMov) +
-      `<div class="filters"><select id="f-cuenta" aria-label="Filtrar por cuenta"><option value="">Todas las cuentas</option>${opsC}</select><select id="f-cat" aria-label="Filtrar por categoría"><option value="">Todas las categorías</option>${opsK}</select><select id="f-estado" aria-label="Filtrar por estado en el banco"><option value="">Posteados y pendientes</option><option value="pend" ${filtro.estado === 'pend' ? 'selected' : ''}>Solo pendientes</option><option value="post" ${filtro.estado === 'post' ? 'selected' : ''}>Solo posteados</option></select><input id="f-q" type="search" placeholder="Buscar por nota o categoría" value="${esc(filtro.q)}" autocomplete="off"></div><div id="mov-lista" style="display:grid; gap:14px"></div>`;
+      `<div class="filters"><select id="f-cuenta" aria-label="Filtrar por cuenta"><option value="">Todas las cuentas</option>${opsC}</select><select id="f-cat" aria-label="Filtrar por categoría"><option value="">Todas las categorías</option>${opsK}</select><select id="f-estado" aria-label="Filtrar por estado en el banco"><option value="">Posteados y pendientes</option><option value="pend" ${filtro.estado === 'pend' ? 'selected' : ''}>Solo pendientes</option><option value="post" ${filtro.estado === 'post' ? 'selected' : ''}>Solo posteados</option></select><input id="f-q" type="search" placeholder="Buscar por descripción o categoría" value="${esc(filtro.q)}" autocomplete="off"></div><div id="mov-lista" style="display:grid; gap:14px"></div>`;
   }
   function renderMovLista() {
     const q = filtro.q.trim().toLowerCase();
@@ -1351,7 +1358,7 @@
         <div class="frow" id="row-dest"><label for="m-dest">Hacia</label><select id="m-dest">${opsCuenta(destIni)}</select></div>
         <div class="frow" id="row-cat"><label for="m-cat">Categoría</label><select id="m-cat"></select></div>
         <div class="frow"><label for="m-fecha">Fecha</label><input id="m-fecha" type="date" value="${x ? x.fecha : hoyISO()}"></div>
-        <div class="frow"><label for="m-nota">Nota</label><input id="m-nota" type="text" placeholder="Opcional" value="${esc(notaIni)}" autocomplete="off"></div>
+        <div class="frow"><label for="m-nota">Descripción</label><input id="m-nota" type="text" placeholder="Ej. Tremendo Taco" autocapitalize="words" aria-autocomplete="list" value="${esc(notaIni)}" autocomplete="off"></div>
         <div class="frow"><label for="m-post" style="width:auto; flex:1">Ya aparece en el banco</label><input id="m-post" class="switch" type="checkbox" ${x && x.posteado ? 'checked' : ''}></div>
         ${x ? '' : `<div class="frow"><label for="m-rep">Repetir</label><select id="m-rep"><option value="">Nunca</option>${Object.entries(FRECS).map(([k, [n]]) => `<option value="${k}">${n}</option>`).join('')}</select></div>`}
       </div>
@@ -1375,6 +1382,53 @@
     pintar();
     b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
     conCatNueva(b, '#m-cat', () => tipo, pintar);
+    // Autocompletar la descripción con lo que ya has escrito antes
+    {
+      const notaInp = $('#m-nota', b);
+      const sug = document.createElement('div');
+      sug.className = 'sug'; sug.hidden = true; sug.setAttribute('role', 'listbox');
+      notaInp.closest('.frow').after(sug);
+      let hist = null, lista = [];
+      const historial = () => {
+        const m = new Map();
+        S.movimientos.forEach((mv) => {
+          const n = (mv.nota || '').trim(); if (!n) return;
+          const k = n.toLowerCase(), e = m.get(k) || { n, cnt: 0, last: '', x: null };
+          e.cnt++;
+          if (mv.fecha >= e.last) { e.last = mv.fecha; e.x = mv; e.n = n; }
+          m.set(k, e);
+        });
+        return [...m.values()];
+      };
+      const resaltar = (t, q) => { const i = t.toLowerCase().indexOf(q); return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<b>' + esc(t.slice(i, i + q.length)) + '</b>' + esc(t.slice(i + q.length)); };
+      const mostrar = () => {
+        const q = notaInp.value.trim().toLowerCase();
+        if (!q) { sug.hidden = true; return; }
+        hist = hist || historial();
+        lista = hist.filter((e) => e.x.tipo === tipo && e.n.toLowerCase() !== q && e.n.toLowerCase().includes(q))
+          .sort((a, c) => (c.n.toLowerCase().startsWith(q) - a.n.toLowerCase().startsWith(q)) || c.cnt - a.cnt || c.last.localeCompare(a.last)).slice(0, 5);
+        if (!lista.length) { sug.hidden = true; return; }
+        sug.innerHTML = lista.map((e, i) => { const c = cat(e.x.categoriaId); return `<button type="button" class="sug-i" role="option" data-i="${i}">${e.x.tipo === 'transferencia' ? `<span class="ic" style="--c:var(--c-gray)">${IC.flechas}</span>` : icCat(c)}<span class="rt"><span class="t1">${resaltar(e.n, q)}</span><span class="t2">${esc([c ? c.nombre : '', e.cnt + (e.cnt === 1 ? ' vez' : ' veces'), 'última ' + moneyAbs(e.x.monto)].filter(Boolean).join(' · '))}</span></span></button>`; }).join('');
+        sug.hidden = false;
+      };
+      notaInp.addEventListener('input', mostrar);
+      notaInp.addEventListener('focus', mostrar);
+      notaInp.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 180));
+      notaInp.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sug.hidden) { e.stopPropagation(); sug.hidden = true; } });
+      sug.addEventListener('pointerdown', (e) => e.preventDefault());
+      sug.addEventListener('click', (e) => {
+        const bt = e.target.closest('.sug-i'); if (!bt) return;
+        const ent = lista[+bt.dataset.i]; if (!ent) return;
+        const x0 = ent.x;
+        notaInp.value = ent.n;
+        if (tipo !== 'transferencia' && x0.categoriaId && cat(x0.categoriaId)) pintar(x0.categoriaId);
+        if (CM.some((c) => c.id === x0.cuentaId)) $('#m-cuenta', b).value = x0.cuentaId;
+        if (tipo === 'transferencia' && CM.some((c) => c.id === x0.cuentaDestinoId)) $('#m-dest', b).value = x0.cuentaDestinoId;
+        sug.hidden = true;
+        const monto = $('#m-monto', b);
+        if (!monto.value) monto.focus();
+      });
+    }
     $('#form-mov', b).addEventListener('submit', (e) => {
       e.preventDefault();
       const monto = parseMonto($('#m-monto', b).value), cId = $('#m-cuenta', b).value, dId = $('#m-dest', b).value, fecha = $('#m-fecha', b).value;
