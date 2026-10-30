@@ -566,7 +566,7 @@
       const tipo = ['gasto', 'ingreso', 'transferencia'].includes(r.tipo) ? r.tipo : 'gasto';
       return { id: String(r.id), tipo, monto: Math.abs(num(r.monto)), cuentaId: r.cuentaId, cuentaDestinoId: tipo === 'transferencia' && ids.has(r.cuentaDestinoId) ? r.cuentaDestinoId : null, categoriaId: tipo === 'transferencia' ? null : (r.categoriaId || null), nota: String(r.nota || ''), frecuencia: r.frecuencia, inicio: r.inicio, fin: fISO(r.fin), hasta: fISO(r.hasta), modo: r.modo === 'confirmar' ? 'confirmar' : 'auto' };
     }).filter((r) => r.tipo !== 'transferencia' || r.cuentaDestinoId);
-    out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)), claveCopia: s.config && typeof s.config.claveCopia === 'string' ? s.config.claveCopia : '', recordatorioDias: [0, 1, 7, 14, 30].includes(s.config && s.config.recordatorioDias) ? s.config.recordatorioDias : 7 };
+    out.config = { ingresoMensual: Math.max(0, num(s.config && s.config.ingresoMensual)), ahorroMensual: Math.max(0, num(s.config && s.config.ahorroMensual)), limitesAuto: !(s.config && s.config.limitesAuto === false), claveCopia: s.config && typeof s.config.claveCopia === 'string' ? s.config.claveCopia : '', recordatorioDias: [0, 1, 7, 14, 30].includes(s.config && s.config.recordatorioDias) ? s.config.recordatorioDias : 7 };
     return out;
   }
   // Almacenamiento principal: IndexedDB (sin el límite de ~5 MB de localStorage). Si no está disponible, localStorage.
@@ -913,6 +913,29 @@
     if (confirmar) return `<div class="row" style="flex-wrap:wrap; cursor:default; row-gap:8px">${x.ic}<span class="rt"><span class="t1">${esc(x.titulo)}</span><span class="t2">${esc(sub)}</span></span>${x.amt}<div style="display:flex; gap:10px; width:100%; padding:0 0 4px 46px"><button class="btn small" type="button" data-act="rec-confirmar" data-id="${r.id}" data-f="${f}">Registrar</button><button class="btn small tinted" type="button" data-act="rec-saltar" data-id="${r.id}" data-f="${f}">Saltar esta vez</button></div></div>`;
     return `<button class="row" type="button" data-act="editar-rec" data-id="${r.id}">${x.ic}<span class="rt"><span class="t1">${esc(x.titulo)}</span><span class="t2">${esc(sub)}</span></span>${x.amt}</button>`;
   }
+  // Límites automáticos: promedio de lo gastado en cada categoría en los últimos 3 meses con movimientos
+  function promediosCat(ym) {
+    const meses = [];
+    for (let i = 1; i <= 3; i++) { const m = addMes(ym, -i); if (S.movimientos.some((x) => x.fecha.slice(0, 7) === m)) meses.push(statsMes(m).porCat); }
+    const out = {};
+    if (!meses.length) return out;
+    meses.reverse(); // del más viejo al más reciente
+    S.categorias.forEach((c) => {
+      if (c.tipo !== 'gasto') return;
+      const i0 = meses.findIndex((pc) => (pc[c.id] || 0) > 0.005);
+      if (i0 < 0) return;
+      const usados = meses.slice(i0), v = suma(usados.map((pc) => pc[c.id] || 0)) / usados.length;
+      out[c.id] = { v: Math.ceil(v), n: usados.length };
+    });
+    return out;
+  }
+  // Límite de una categoría: el tuyo si lo pusiste; si no, el automático
+  function limiteDe(c, prom, cuotas) {
+    if (c.id === CAT_PREST) return { v: cuotas, auto: false };
+    if (c.presupuesto > 0) return { v: c.presupuesto, auto: false };
+    if (S.config.limitesAuto && prom[c.id]) return { v: prom[c.id].v, auto: true, n: prom[c.id].n };
+    return { v: 0, auto: false };
+  }
   // Ahorro real del mes: lo que entra a cuentas de ahorro o inversión desde otras cuentas (o como ingreso directo), menos lo que sacas
   const esAhorro = (c) => !!c && (c.tipo === 'ahorro' || c.tipo === 'inversion');
   function ahorroMes(ym) {
@@ -1116,7 +1139,9 @@
   function vPresupuesto() {
     const ym = mesPres, st = statsMes(ym), pa = planAhorro(), cuotas = cuotasMes(ym), ip = ingresoPlan(ym), ing = ip.v;
     const gastos = S.categorias.filter((c) => c.tipo === 'gasto');
-    const presDe = (c) => (c.id === CAT_PREST ? cuotas : c.presupuesto);
+    const prom = promediosCat(ym);
+    const limDe = (c) => limiteDe(c, prom, cuotas);
+    const presDe = (c) => limDe(c).v;
     const porGrupo = (g) => suma(gastos.filter((c) => c.grupo === g).map(presDe));
     const nec = porGrupo('necesidades'), gus = porGrupo('gustos'), deu = porGrupo('deuda');
     const amP = ahorroMes(ym), ahV = Math.max(pa.plan, amP.neto);
@@ -1157,7 +1182,7 @@
     ['necesidades', 'gustos', 'deuda'].forEach((g) => {
       const cs = gastos.filter((c) => c.grupo === g);
       if (!cs.length) return;
-      html += `<section class="section"><div class="sh"><h2>${GRUPOS[g]}</h2><span class="muted" style="font-size:15px">${(() => { const gs = suma(cs.map((c) => st.porCat[c.id] || 0)), ps = suma(cs.map(presDe)); return ps > 0.005 ? `${money(gs)} de ${money(ps)}` : `${money(gs)} gastado`; })()}</span></div><div class="group">${cs.map((c) => filaCat(c, st.porCat[c.id] || 0, presDe(c), cuotas)).join('')}${g === 'gustos' ? `<button class="row add-row" type="button" data-act="nueva-cat"><span class="ic">${IC.plus}</span><span class="rt"><span class="t1">Nueva categoría</span></span></button>` : ''}</div></section>`;
+      html += `<section class="section"><div class="sh"><h2>${GRUPOS[g]}</h2><span class="muted" style="font-size:15px">${(() => { const gs = suma(cs.map((c) => st.porCat[c.id] || 0)), ps = suma(cs.map(presDe)); return ps > 0.005 ? `${money(gs)} de ${money(ps)}` : `${money(gs)} gastado`; })()}</span></div><div class="group">${cs.map((c) => filaCat(c, st.porCat[c.id] || 0, presDe(c), cuotas, limDe(c).auto)).join('')}${g === 'gustos' ? `<button class="row add-row" type="button" data-act="nueva-cat"><span class="ic">${IC.plus}</span><span class="rt"><span class="t1">Nueva categoría</span></span></button>` : ''}</div></section>`;
     });
     if (st.porCat._g) html += `<p class="warn-box">Tienes ${money(st.porCat._g)} en gastos sin categoría este mes.</p>`;
 
@@ -1168,13 +1193,13 @@
     html += `<section class="section"><div class="sh"><h2>Ingresos</h2><span class="muted" style="font-size:15px">${money(st.ing)} recibido</span></div><div class="group">${ingCats.map((c) => `<button class="row" type="button" data-act="editar-cat" data-id="${c.id}">${icCat(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span></span><span class="amt pos">${money(st.porCat[c.id] || 0)}</span></button>`).join('')}<button class="row add-row" type="button" data-act="nueva-cat" data-tipo="ingreso"><span class="ic">${IC.plus}</span><span class="rt"><span class="t1">Nueva categoría de ingreso</span></span></button></div></section>`;
     return html;
   }
-  function filaCat(c, gastado, pres, cuotas) {
+  function filaCat(c, gastado, pres, cuotas, auto) {
     const over = pres > 0.005 && gastado > pres + 0.005;
     const ratio = pres > 0 ? Math.min(1, gastado / pres) : 0;
     const color = over ? 'red' : ratio > 0.85 ? 'orange' : c.color;
     let sub, der;
     if (c.id === CAT_PREST) sub = cuotas > 0 ? `${money(gastado)} de ${money(cuotas)} · cuotas del mes` : 'Se llena solo con tus préstamos';
-    else sub = pres > 0 ? `${money(gastado)} de ${money(pres)}` : (gastado > 0 ? `${money(gastado)} gastado` : 'Toca para poner un límite');
+    else sub = pres > 0 ? `${money(gastado)} de ${money(pres)}${auto ? ' · automático' : ''}` : (gastado > 0 ? `${money(gastado)} gastado` : 'Toca para poner un límite');
     if (pres > 0.005) der = over ? `<span class="amt neg">${moneyAbs(gastado - pres)}<small>te pasaste</small></span>` : `<span class="amt">${moneyAbs(pres - gastado)}<small>disponible</small></span>`;
     else der = `<span class="amt muted">${gastado > 0 ? money(gastado) : ''}<small>${gastado > 0 ? 'sin límite' : ''}</small></span>`;
     return `<button class="row" type="button" data-act="editar-cat" data-id="${c.id}">${icCat(c)}<span class="rt" style="gap:5px"><span class="t1">${esc(c.nombre)}</span><span class="t2" style="white-space:normal">${sub}</span>${pres > 0.005 ? `<span class="bar" style="--c:var(--c-${color})"><i style="width:${(ratio * 100).toFixed(1)}%"></i></span>` : ''}</span>${der}</button>`;
@@ -1633,10 +1658,10 @@
       <div class="group">
         <div class="frow"><label for="k-nombre">Nombre</label><input id="k-nombre" type="text" value="${c ? esc(c.nombre) : ''}" placeholder="Ej. Mascotas" autocomplete="off" ${sis ? 'disabled' : 'autofocus'}></div>
         ${tipo === 'gasto' ? `<div class="frow"><label for="k-grupo">Tipo de gasto</label><select id="k-grupo" ${sis ? 'disabled' : ''}>${Object.entries(GRUPOS).map(([k, n]) => `<option value="${k}" ${(c ? c.grupo : 'gustos') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-        <div class="frow"><label for="k-pres">Límite al mes</label><input id="k-pres" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${sis ? fmtNum(cuotasMes(mesPres)) : (c && c.presupuesto ? fmtNum(c.presupuesto) : '')}" ${sis ? 'disabled' : ''}></div>` : ''}
+        <div class="frow"><label for="k-pres">Límite al mes</label><input id="k-pres" class="money" type="text" inputmode="numeric" placeholder="${(() => { const pr = c ? promediosCat(mesPres)[c.id] : null; return pr && S.config.limitesAuto ? 'Auto: ' + money(pr.v) : (S.config.limitesAuto ? 'Automático' : '0.00'); })()}" autocomplete="off" value="${sis ? fmtNum(cuotasMes(mesPres)) : (c && c.presupuesto ? fmtNum(c.presupuesto) : '')}" ${sis ? 'disabled' : ''}></div>` : ''}
         ${sis ? '' : `<div class="frow col"><span class="lbl">Color</span>${opsColor(c ? c.color : 'blue')}</div>`}
       </div>
-      <p class="note">${sis ? 'El límite de esta categoría es la suma de las cuotas de tus préstamos de este mes. Registra aquí tus pagos de préstamos para que el presupuesto los vea.' : tipo === 'gasto' ? 'Necesidades: lo indispensable (renta, comida, luz). Gustos: lo que podrías recortar. Deudas: pagos de créditos.' : ''}</p>
+      <p class="note">${sis ? 'El límite de esta categoría es la suma de las cuotas de tus préstamos de este mes. Registra aquí tus pagos de préstamos para que el presupuesto los vea.' : tipo === 'gasto' ? (S.config.limitesAuto ? 'Déjalo vacío y la app pone el límite con el promedio de lo que gastaste en esta categoría en los últimos 3 meses. Escribe una cantidad solo si quieres fijarla. ' : '') + 'Necesidades: lo indispensable (renta, comida, luz). Gustos: lo que podrías recortar. Deudas: pagos de créditos.' : ''}</p>
       <p class="form-error" id="k-error" role="alert"></p>
       ${c && !sis ? '<button class="btn block destructive" type="button" id="k-borrar">Eliminar categoría</button>' : ''}
     </div></form>`);
@@ -1712,6 +1737,10 @@
         <div class="frow"><label for="s-aho">Ahorrar al mes</label><input id="s-aho" class="money" type="text" inputmode="numeric" placeholder="Según mis metas" autocomplete="off" value="${S.config.ahorroMensual ? fmtNum(S.config.ahorroMensual) : ''}"></div>
       </div>
       <p class="note" id="s-hint"></p>
+      <div class="group">
+        <div class="frow"><label for="s-auto" class="lbl-w">Límites automáticos</label><input id="s-auto" class="switch" type="checkbox" ${S.config.limitesAuto ? 'checked' : ''}></div>
+      </div>
+      <p class="note">En las categorías donde no pongas un límite, la app usa el promedio de lo que gastaste en los últimos 3 meses, y se ajusta solo cada mes. Si escribes un límite en una categoría, ese manda.</p>
     </div></form>`);
     const hint = () => {
       const ing = parseMonto($('#s-ing', b).value) || 0;
@@ -1722,6 +1751,7 @@
       e.preventDefault();
       S.config.ingresoMensual = Math.max(0, parseMonto($('#s-ing', b).value) || 0);
       S.config.ahorroMensual = Math.max(0, parseMonto($('#s-aho', b).value) || 0);
+      S.config.limitesAuto = $('#s-auto', b).checked;
       guardar(); cerrarSheet(); toast('Plan actualizado'); render();
     });
   }
