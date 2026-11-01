@@ -553,7 +553,8 @@
       id: String(c.id), nombre: String(c.nombre || 'Cuenta'), tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'cheques',
       saldoInicial: num(c.saldoInicial), limite: Math.max(0, num(c.limite)), creado: c.creado || new Date().toISOString(),
       historial: Array.isArray(c.historial) ? c.historial.filter((h) => h && /^\d{4}-\d{2}-\d{2}$/.test(h.f || '')).map((h) => ({ f: h.f, v: num(h.v) })).slice(-60) : [],
-      diaPago: Math.min(31, Math.max(0, Math.round(num(c.diaPago)))), diaCorte: Math.min(31, Math.max(0, Math.round(num(c.diaCorte))))
+      diaPago: Math.min(31, Math.max(0, Math.round(num(c.diaPago)))), diaCorte: Math.min(31, Math.max(0, Math.round(num(c.diaCorte)))),
+      saldoCorte: c.saldoCorte && /^\d{4}-\d{2}-\d{2}$/.test(c.saldoCorte.f || '') ? { f: c.saldoCorte.f, v: Math.max(0, num(c.saldoCorte.v)) } : null
     }));
     const ids = new Set(out.cuentas.map((c) => c.id));
     out.categorias = Array.isArray(s.categorias) && s.categorias.length
@@ -1030,12 +1031,23 @@
   function saldoAl(c, iso) { let v = c.saldoInicial; S.movimientos.forEach((x) => { if (x.fecha <= iso) v += efecto(x, c.id); }); return v; }
   function abonosEntre(c, desde, hasta) { let t = 0; S.movimientos.forEach((x) => { if (x.fecha > desde && x.fecha <= hasta) { const e = efecto(x, c.id); if (e > 0) t += e; } }); return t; }
   const diasHasta = (iso) => Math.round((parseISO(iso) - parseISO(hoyISO())) / 864e5);
+  // Día desde el que cuenta la deuda inicial: cuando creaste la tarjeta o su primer movimiento, lo que sea antes
+  function inicioCuenta(c) {
+    let f = c.creado ? isoDe(new Date(c.creado)) : hoyISO();
+    S.movimientos.forEach((x) => { if ((x.cuentaId === c.id || x.cuentaDestinoId === c.id) && x.fecha < f) f = x.fecha; });
+    return f;
+  }
+  function deudaAlCorte(c, corte) {
+    if (c.saldoCorte && c.saldoCorte.f === corte) return c.saldoCorte.v;
+    if (corte < inicioCuenta(c)) return 0;
+    return Math.max(0, -saldoAl(c, corte));
+  }
   function estadoTarjeta(c) {
     if (!c || c.tipo !== 'tarjeta' || !c.diaPago) return null;
     const hoy = hoyISO(), deudaHoy = Math.max(0, -saldoAl(c, '9999-12-31'));
     if (c.diaCorte) {
       const corte = diaEnOAntes(c.diaCorte, hoy), venc = diaDespues(c.diaPago, corte);
-      const total = Math.max(0, -saldoAl(c, corte)), abonado = abonosEntre(c, corte, hoy);
+      const total = deudaAlCorte(c, corte), abonado = abonosEntre(c, corte, hoy);
       const porPagar = Math.max(0, total - abonado);
       if (venc < hoy && porPagar <= 0.005) {
         const corteSig = diaDespues(c.diaCorte, corte);
@@ -1653,6 +1665,7 @@
         <div class="frow"><label for="a-saldo" id="l-saldo">Saldo actual</label><input id="a-saldo" class="money signed" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" ${esRet ? 'autofocus' : ''}></div>
         <div class="frow" id="row-corte"><label for="a-corte">Día de corte</label><select id="a-corte">${[0, ...Array.from({ length: 31 }, (_, i) => i + 1)].map((d) => `<option value="${d}" ${(c ? c['diaCorte'] : 0) === d ? 'selected' : ''}>${d ? 'Día ' + d : 'Sin definir'}</option>`).join('')}</select></div>
         <div class="frow" id="row-pago"><label for="a-pago">Día de pago</label><select id="a-pago">${[0, ...Array.from({ length: 31 }, (_, i) => i + 1)].map((d) => `<option value="${d}" ${(c ? c['diaPago'] : 0) === d ? 'selected' : ''}>${d ? 'Día ' + d : 'Sin definir'}</option>`).join('')}</select></div>
+        <div class="frow" id="row-scorte"><label for="a-scorte">Saldo del último corte</label><input id="a-scorte" class="money" type="text" inputmode="numeric" placeholder="Calcular" autocomplete="off" value="${c && c.saldoCorte && c.diaCorte && c.saldoCorte.f === diaEnOAntes(c.diaCorte, hoyISO()) ? fmtNum(c.saldoCorte.v) : ''}"></div>
         <div class="frow" id="row-lim"><label for="a-lim">Límite de crédito</label><input id="a-lim" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${c && c.limite ? fmtNum(c.limite) : ''}"></div>
       </div>
       <p class="note" id="a-hint"></p>
@@ -1663,9 +1676,9 @@
     </div></form>`);
     const pintar = () => {
       const esT = $('#a-tipo', b).value === 'tarjeta', esR = $('#a-tipo', b).value === 'retiro';
-      $('#row-lim', b).hidden = !esT; $('#row-corte', b).hidden = !esT; $('#row-pago', b).hidden = !esT;
+      $('#row-lim', b).hidden = !esT; $('#row-corte', b).hidden = !esT; $('#row-scorte', b).hidden = !esT; $('#row-pago', b).hidden = !esT;
       $('#l-saldo', b).textContent = esT ? 'Deuda actual' : 'Saldo actual';
-      $('#a-hint', b).textContent = esR ? 'Cuando revises tu cuenta de retiro, escribe aquí el saldo nuevo. No lleva movimientos diarios; el saldo se suma a lo que tienes y a tu patrimonio.' : esT ? 'Escribe lo que debes hoy en la tarjeta. Los gastos con tarjeta suben la deuda y los pagos (transferencias) la bajan. Con el día de pago la app te avisa cuánto pagar y cuándo; con el día de corte separa lo que compraste después del corte, que se paga hasta el siguiente mes.' : 'Escribe lo que tienes hoy en la cuenta. Si después no coincide con tu banco, aquí lo corriges.';
+      $('#a-hint', b).textContent = esR ? 'Cuando revises tu cuenta de retiro, escribe aquí el saldo nuevo. No lleva movimientos diarios; el saldo se suma a lo que tienes y a tu patrimonio.' : esT ? 'Escribe lo que debes hoy en la tarjeta. Los gastos con tarjeta suben la deuda y los pagos (transferencias) la bajan. Con el día de pago la app te avisa cuánto pagar y cuándo; con el día de corte separa lo que compraste después del corte, que se paga hasta el siguiente mes. En «Saldo del último corte» puedes poner el «statement balance» de tu estado de cuenta (aunque sea 0) para que cuadre exacto; si lo dejas vacío, la app lo calcula.' : 'Escribe lo que tienes hoy en la cuenta. Si después no coincide con tu banco, aquí lo corriges.';
     };
     const valIni = c ? (c.tipo === 'tarjeta' ? -actual : actual) : 0;
     $('#a-saldo', b).value = c ? fmtNum(valIni) : '';
@@ -1680,12 +1693,14 @@
       const deseado = tipo === 'tarjeta' ? -v : v;
       const lim = tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-lim', b).value) || 0) : 0;
       const diaPago = tipo === 'tarjeta' ? +$('#a-pago', b).value : 0, diaCorte = tipo === 'tarjeta' ? +$('#a-corte', b).value : 0;
+      const scRaw = $('#a-scorte', b).value.trim();
+      const saldoCorte = tipo === 'tarjeta' && diaCorte && scRaw !== '' && !isNaN(parseMonto(scRaw)) ? { f: diaEnOAntes(diaCorte, hoyISO()), v: Math.max(0, parseMonto(scRaw)) } : null;
       const hist = c ? c.historial.slice() : [];
       if (tipo === 'retiro' && (!hist.length || Math.abs(hist[hist.length - 1].v - deseado) > 0.004)) {
         if (hist.length && hist[hist.length - 1].f === hoyISO()) hist[hist.length - 1].v = deseado; else hist.push({ f: hoyISO(), v: deseado });
       }
-      if (c) { Object.assign(c, { nombre, tipo, limite: lim, diaPago, diaCorte, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
-      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, diaPago, diaCorte, creado: new Date().toISOString(), historial: hist });
+      if (c) { Object.assign(c, { nombre, tipo, limite: lim, diaPago, diaCorte, saldoCorte, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
+      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, diaPago, diaCorte, saldoCorte, creado: new Date().toISOString(), historial: hist });
       guardar(); cerrarSheet(); toast(c ? (tipo === 'retiro' ? 'Saldo actualizado' : 'Cuenta actualizada') : 'Cuenta agregada'); render();
     });
     if (c) {
