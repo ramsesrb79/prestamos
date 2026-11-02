@@ -583,7 +583,8 @@
       historial: Array.isArray(c.historial) ? c.historial.filter((h) => h && /^\d{4}-\d{2}-\d{2}$/.test(h.f || '')).map((h) => ({ f: h.f, v: num(h.v) })).slice(-60) : [],
       diaPago: Math.min(31, Math.max(0, Math.round(num(c.diaPago)))), diaCorte: Math.min(31, Math.max(0, Math.round(num(c.diaCorte)))),
       saldoCorte: c.saldoCorte && /^\d{4}-\d{2}-\d{2}$/.test(c.saldoCorte.f || '') ? { f: c.saldoCorte.f, v: Math.max(0, num(c.saldoCorte.v)) } : null,
-      autopago: c.autopago && c.autopago.cuentaId ? { cuentaId: String(c.autopago.cuentaId), hasta: /^\d{4}-\d{2}-\d{2}$/.test(c.autopago.hasta || '') ? c.autopago.hasta : '' } : null
+      autopago: c.autopago && c.autopago.cuentaId ? { cuentaId: String(c.autopago.cuentaId), hasta: /^\d{4}-\d{2}-\d{2}$/.test(c.autopago.hasta || '') ? c.autopago.hasta : '' } : null,
+      tasaTarjeta: Math.max(0, num(c.tasaTarjeta)), pagoMinimo: Math.max(0, num(c.pagoMinimo))
     }));
     const ids = new Set(out.cuentas.map((c) => c.id));
     out.categorias = Array.isArray(s.categorias) && s.categorias.length
@@ -1437,6 +1438,7 @@
     if (prestAbierto && S.prestamos.some((p) => p.id === prestAbierto)) return vPrestDetalle();
     prestAbierto = null;
     let html = encabezado('Préstamos', '', btnMas('nuevo-prest', 'Nuevo préstamo'));
+    if (hayDeuda()) html += `<button class="btn block tinted" type="button" data-act="deudas" style="margin-bottom:16px">Estrategia para pagar deudas</button>`;
     if (!S.prestamos.length) return html + `<div class="empty"><strong>Aún no tienes préstamos</strong>Registra tu hipoteca, tu auto o cualquier crédito, y simula abonos extra para pagarlo antes.<button class="btn small" type="button" data-act="nuevo-prest">Agregar préstamo</button></div>`;
     const calc = S.prestamos.map((p) => ({ p, a: amortizar(p) }));
     html += `<div class="stats"><div class="stat"><p class="k">Debes hoy</p><p class="v">${money(suma(calc.map((x) => x.a.saldoHoy)))}</p></div><div class="stat"><p class="k">Pagos al mes</p><p class="v">${money(suma(calc.filter((x) => x.a.saldoHoy > 0).map((x) => x.a.cuota)))}</p></div><div class="stat"><p class="k">Abonos extra</p><p class="v">${money(suma(calc.map((x) => x.a.totEx)))}</p></div><div class="stat"><p class="k">Intereses ahorrados</p><p class="v pos">${money(suma(calc.map((x) => x.a.ahorro)))}</p></div></div>`;
@@ -1792,6 +1794,8 @@
         <div class="frow" id="row-pago"><label for="a-pago">Día de pago</label><select id="a-pago">${[0, ...Array.from({ length: 31 }, (_, i) => i + 1)].map((d) => `<option value="${d}" ${(c ? c['diaPago'] : 0) === d ? 'selected' : ''}>${d ? 'Día ' + d : 'Sin definir'}</option>`).join('')}</select></div>
         <div class="frow" id="row-scorte"><label for="a-scorte">Saldo del último corte</label><input id="a-scorte" class="money" type="text" inputmode="numeric" placeholder="Calcular" autocomplete="off" value="${c && c.saldoCorte && c.diaCorte && c.saldoCorte.f === diaEnOAntes(c.diaCorte, hoyISO()) ? fmtNum(c.saldoCorte.v) : ''}"></div>
         <div class="frow" id="row-lim"><label for="a-lim">Límite de crédito</label><input id="a-lim" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${c && c.limite ? fmtNum(c.limite) : ''}"></div>
+        <div class="frow" id="row-tasa"><label for="a-tasa">Tasa de interés anual (%)</label><input id="a-tasa" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${c && c.tasaTarjeta ? c.tasaTarjeta : ''}"></div>
+        <div class="frow" id="row-min"><label for="a-min">Pago mínimo</label><input id="a-min" class="money" type="text" inputmode="numeric" placeholder="Automático" autocomplete="off" value="${c && c.pagoMinimo ? fmtNum(c.pagoMinimo) : ''}"></div>
         <div class="frow" id="row-auto"><label for="a-auto">Pago automático</label><select id="a-auto"><option value="">No</option>${S.cuentas.filter((x) => x.tipo !== 'tarjeta' && x.tipo !== 'retiro').map((x) => `<option value="${x.id}" ${c && c.autopago && c.autopago.cuentaId === x.id ? 'selected' : ''}>Desde ${esc(x.nombre)}</option>`).join('')}</select></div>
       </div>
       <p class="note" id="a-hint"></p>
@@ -1802,7 +1806,7 @@
     </div></form>`);
     const pintar = () => {
       const esT = $('#a-tipo', b).value === 'tarjeta', esR = $('#a-tipo', b).value === 'retiro';
-      $('#row-lim', b).hidden = !esT; $('#row-corte', b).hidden = !esT; $('#row-scorte', b).hidden = !esT; $('#row-pago', b).hidden = !esT; $('#row-auto', b).hidden = !esT;
+      $('#row-lim', b).hidden = !esT; $('#row-corte', b).hidden = !esT; $('#row-scorte', b).hidden = !esT; $('#row-pago', b).hidden = !esT; $('#row-auto', b).hidden = !esT; $('#row-tasa', b).hidden = !esT; $('#row-min', b).hidden = !esT;
       $('#l-saldo', b).textContent = esT ? 'Deuda actual' : 'Saldo actual';
       $('#a-hint', b).textContent = esR ? 'Cuando revises tu cuenta de retiro, escribe aquí el saldo nuevo. No lleva movimientos diarios; el saldo se suma a lo que tienes y a tu patrimonio.' : esT ? 'Escribe lo que debes hoy en la tarjeta. Los gastos con tarjeta suben la deuda y los pagos (transferencias) la bajan. Con el día de pago la app te avisa cuánto pagar y cuándo; con el día de corte separa lo que compraste después del corte, que se paga hasta el siguiente mes. En «Saldo del último corte» puedes poner el «statement balance» de tu estado de cuenta (aunque sea 0) para que cuadre exacto; si lo dejas vacío, la app lo calcula. Con «Pago automático» la app registra sola, en cada día de pago, una transferencia desde la cuenta que elijas por el saldo de ese corte (necesita día de corte y día de pago). Empieza en el próximo vencimiento; los pagos que ya hiciste no se tocan.' : 'Escribe lo que tienes hoy en la cuenta. Si después no coincide con tu banco, aquí lo corriges.';
     };
@@ -1828,8 +1832,8 @@
       if (tipo === 'retiro' && (!hist.length || Math.abs(hist[hist.length - 1].v - deseado) > 0.004)) {
         if (hist.length && hist[hist.length - 1].f === hoyISO()) hist[hist.length - 1].v = deseado; else hist.push({ f: hoyISO(), v: deseado });
       }
-      if (c) { Object.assign(c, { nombre, tipo, limite: lim, diaPago, diaCorte, saldoCorte, autopago, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
-      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, diaPago, diaCorte, saldoCorte, autopago, creado: new Date().toISOString(), historial: hist });
+      if (c) { Object.assign(c, { nombre, tipo, limite: lim, diaPago, diaCorte, saldoCorte, autopago, tasaTarjeta: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-tasa', b).value) || 0) : 0, pagoMinimo: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-min', b).value) || 0) : 0, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
+      else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, diaPago, diaCorte, saldoCorte, autopago, tasaTarjeta: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-tasa', b).value) || 0) : 0, pagoMinimo: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-min', b).value) || 0) : 0, creado: new Date().toISOString(), historial: hist });
       guardar(); cerrarSheet(); toast(c ? (tipo === 'retiro' ? 'Saldo actualizado' : 'Cuenta actualizada') : 'Cuenta agregada'); render();
     });
     if (c) {
@@ -2132,6 +2136,66 @@
     pintarReporte();
   }
 
+  // ================= Estrategia para pagar deudas =================
+  function deudas() {
+    const out = [];
+    S.cuentas.forEach((c) => { if (c.tipo === 'tarjeta') { const b = Math.max(0, -saldoAl(c, '9999-12-31')); if (b > 0.5) out.push({ clase: 'tarjeta', nombre: c.nombre, saldo: b, apr: Math.max(0, num(c.tasaTarjeta)), aprM: Math.max(0, num(c.tasaTarjeta)) / 100 / 12, min: c.pagoMinimo > 0 ? c.pagoMinimo : null }); } });
+    S.prestamos.forEach((p) => { if (p.enPatrimonio === false) return; const a = amortizar(p); if (a.saldoHoy > 0.5) out.push({ clase: 'prestamo', nombre: p.nombre, saldo: a.saldoHoy, apr: p.tasa, aprM: p.tasa / 100 / 12, min: a.cuota }); });
+    return out;
+  }
+  function hayDeuda() { return deudas().length > 0; }
+  function minDeuda(d, bal) { return d.min != null ? Math.min(d.min, bal * (1 + d.aprM) + 1) : Math.max(25, 0.02 * bal); }
+  function simularDeudas(ds, extra, estrategia) {
+    const bal = ds.map((d) => d.saldo); let meses = 0, totalInt = 0; const pagadoEn = {}; const MAXM = 1200;
+    while (bal.some((b) => b > 0.005) && meses < MAXM) {
+      meses++;
+      ds.forEach((d, i) => { if (bal[i] > 0.005) { const it = bal[i] * d.aprM; bal[i] += it; totalInt += it; } });
+      let pool = extra; ds.forEach((d, i) => { if (bal[i] > 0.005) pool += minDeuda(d, bal[i]); });
+      ds.forEach((d, i) => { if (bal[i] > 0.005) { const pay = Math.min(minDeuda(d, bal[i]), bal[i], pool); bal[i] -= pay; pool -= pay; } });
+      const activos = ds.map((d, i) => i).filter((i) => bal[i] > 0.005);
+      activos.sort((a, c) => estrategia === 'avalancha' ? (ds[c].aprM - ds[a].aprM) || (bal[a] - bal[c]) : (bal[a] - bal[c]) || (ds[c].aprM - ds[a].aprM));
+      for (const i of activos) { if (pool <= 0.005) break; const pay = Math.min(pool, bal[i]); bal[i] -= pay; pool -= pay; }
+      ds.forEach((d, i) => { if (bal[i] <= 0.005 && !(i in pagadoEn)) { pagadoEn[i] = meses; bal[i] = 0; } });
+    }
+    return { meses, totalInt, pagadoEn, liquidado: !bal.some((b) => b > 0.005) };
+  }
+  let deudaExtra = 0, deudaEst = 'avalancha';
+  function sheetDeudas() {
+    const b = abrirSheet(`${cabeza('Estrategia para pagar deudas', false)}<div style="display:grid; gap:14px">
+      <div class="group"><div class="frow"><label for="d-extra">Pago extra al mes</label><input id="d-extra" class="money" type="text" inputmode="numeric" placeholder="0.00" autocomplete="off" value="${deudaExtra > 0 ? fmtNum(deudaExtra) : ''}"></div></div>
+      <div class="seg" id="d-seg"><button type="button" class="${deudaEst === 'avalancha' ? 'on' : ''}" data-e="avalancha">Avalancha</button><button type="button" class="${deudaEst === 'nieve' ? 'on' : ''}" data-e="nieve">Bola de nieve</button></div>
+      <div id="d-res"></div>
+      <p class="note" style="margin:0">El «pago extra» es lo que puedes dar al mes además de los mínimos. La estimación supone que sigues pagando igual cada mes hasta liquidar.</p>
+    </div>`);
+    function pintarDeudas() {
+      const ds = deudas();
+      if (!ds.length) { $('#d-res', b).innerHTML = '<div class="empty" style="background:var(--sheet-card)"><strong>No tienes deudas registradas</strong>Cuando tengas saldo en una tarjeta o un préstamo, aquí te digo el mejor orden para pagarlas.</div>'; return; }
+      const extra = deudaExtra;
+      const r = simularDeudas(ds, extra, deudaEst);
+      const otra = simularDeudas(ds, extra, deudaEst === 'avalancha' ? 'nieve' : 'avalancha');
+      const expl = deudaEst === 'avalancha' ? 'Primero la deuda con el <b>interés más alto</b>. Pagas menos intereses en total.' : 'Primero la deuda <b>más chica</b>. Motiva ver deudas liquidadas pronto.';
+      let h = `<p class="note" style="margin:0 0 12px">${expl}</p>`;
+      if (!r.liquidado) {
+        h += `<div class="empty" style="background:var(--sheet-card)"><strong>Sube el pago extra</strong>Con solo los mínimos, las tarjetas casi no bajan por los intereses. Agrega un pago extra al mes para ver en cuánto quedarías libre.</div>`;
+      } else {
+        const fecha = cap(parseISO(addMes(ymHoy(), r.meses) + '-01').toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }));
+        h += `<div class="stats"><div class="stat"><p class="k">Libre de deudas en</p><p class="v">${tiempo(r.meses)}</p><p class="s">${esc(fecha)}</p></div><div class="stat"><p class="k">Intereses que pagarás</p><p class="v ${r.totalInt > 0.5 ? 'neg' : ''}">${money(r.totalInt)}</p></div></div>`;
+        if (ds.length > 1 && otra.liquidado) {
+          const dif = Math.round(otra.totalInt - r.totalInt);
+          if (deudaEst === 'avalancha' && dif > 1) h += `<p class="note" style="margin:10px 0 0; color:var(--pos)">Con avalancha ahorras ${money(otra.totalInt - r.totalInt)} en intereses frente a la bola de nieve.</p>`;
+          else if (deudaEst === 'nieve' && dif < -1) h += `<p class="note" style="margin:10px 0 0">La avalancha pagaría ${money(r.totalInt - otra.totalInt)} menos en intereses, pero la bola de nieve liquida tu primera deuda antes.</p>`;
+        }
+        const orden = Object.entries(r.pagadoEn).sort((a, c) => a[1] - c[1]);
+        h += `<div style="display:grid; gap:8px; margin-top:14px"><p class="eyebrow" style="padding:0 4px">Orden de pago</p><div class="group">` + orden.map(([i, m], k) => { const d = ds[i]; const fm = cap(parseISO(addMes(ymHoy(), m) + '-01').toLocaleDateString('es-MX', { month: 'short', year: 'numeric' }).replace('.', '')); return `<div class="row plain" style="cursor:default"><span class="ic sq" style="--c:var(--c-${d.clase === 'tarjeta' ? 'orange' : 'indigo'})">${k + 1}</span><span class="rt"><span class="t1">${esc(d.nombre)}</span><span class="t2">${money(d.saldo)}${d.apr > 0 ? ' · ' + d.apr + '% anual' : ''}</span></span><span class="amt">${esc(fm)}<small>liquidada</small></span></div>`; }).join('') + `</div></div>`;
+      }
+      const sinApr = ds.filter((d) => d.clase === 'tarjeta' && !(d.apr > 0)).map((d) => d.nombre);
+      if (sinApr.length) h += `<p class="note" style="margin:12px 0 0">Tomé ${sinApr.length === 1 ? 'esta tarjeta' : 'estas tarjetas'} con 0% de interés porque no tienen tasa: ${esc(sinApr.join(', '))}. Ponla en Cuentas › la tarjeta › «Tasa de interés» para una estimación exacta.</p>`;
+      $('#d-res', b).innerHTML = h;
+    }
+    $('#d-extra', b).addEventListener('input', (e) => { deudaExtra = parseMonto(e.target.value); pintarDeudas(); });
+    $('#d-seg', b).addEventListener('click', (e) => { const t = e.target.closest('[data-e]'); if (!t) return; deudaEst = t.dataset.e; [...$('#d-seg', b).children].forEach((x) => x.classList.toggle('on', x.dataset.e === deudaEst)); pintarDeudas(); });
+    pintarDeudas();
+  }
   function sheetAjustes() {
     const c = textoCopia(), lk = lockCfg();
     const b = abrirSheet(`${cabeza('Ajustes y copia', false)}<div style="display:grid; gap:18px">
@@ -2418,6 +2482,7 @@
     'cerrar-sheet': () => cerrarSheet(),
     'guardar-copia': () => guardarCopia(),
     'reporte': () => sheetReporte(),
+    'deudas': () => sheetDeudas(),
     'posponer-copia': () => { lsSet('copia_pospuesta', Date.now()); render(); toast('Te lo recuerdo mañana'); },
     'abrir-copia': () => $('#archivo').click(),
     'borrar-todo': async () => {
