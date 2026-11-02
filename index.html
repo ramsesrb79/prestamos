@@ -151,6 +151,7 @@
   .ic.sq { border-radius: 9px; }
   .ic.ic-color { background: #eef0f4; }
   .ic.ic-color svg { width: 28px; height: 28px; }
+  .sug-i .ic.ic-color svg { width: 22px; height: 22px; }
   .ic svg { width: 20px; height: 20px; }
   .add-row { color: var(--tint); }
   .add-row .ic { background: var(--tint-soft); color: var(--tint); }
@@ -503,6 +504,72 @@
       tarjeta: s(`<rect x="5" y="13" width="38" height="22" rx="4" fill="#5aa0e0"/><rect x="5" y="18" width="38" height="4.5" fill="#2f3a4a" stroke="none"/><rect x="10" y="26" width="7.5" height="5.5" rx="1.3" fill="#f6c955"/><path d="M22 28h12M22 31h8" stroke="#dbe9f7" stroke-width="1.6"/>`)
     };
   })();
+  // Iconos a color para categorías (se eligen por el nombre)
+  const ICAT = (() => {
+    const O = '#3f352f';
+    const s = (inner) => `<svg viewBox="0 0 48 48" fill="none" stroke="${O}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${inner}</svg>`;
+    const dot = (x, y, r, f) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${f}"/>`;
+    const usd = (x, y, z, f) => `<text x="${x}" y="${y}" font-size="${z}" text-anchor="middle" fill="${f}" stroke="none" font-family="sans-serif" font-weight="800">$</text>`;
+    return {
+      casa: s(`<path d="M8 22 24 9l16 13" fill="#e0693f"/><path d="M11 20v19h26V20L24 10z" fill="#f6dcae"/><path d="M8 22 24 9l16 13" fill="none"/><rect x="20" y="28" width="8" height="11" fill="#b0754a"/><rect x="13.5" y="24" width="5" height="5" fill="#a8d8f0"/><rect x="29.5" y="24" width="5" height="5" fill="#a8d8f0"/>`),
+      foco: s(`<path d="M24 7a11 11 0 0 0-6.5 19.8c1.5 1.1 2.5 2.7 2.5 4.6V33h8v-1.6c0-1.9 1-3.5 2.5-4.6A11 11 0 0 0 24 7z" fill="#ffd75e"/><rect x="19.5" y="33" width="9" height="4" rx="1" fill="#b9c3cf"/><rect x="20.5" y="37" width="7" height="3.5" rx="1.5" fill="#93a3b8"/><path d="M21 22l3 4 3-4" stroke="#e0a521"/><path d="M24 26v7" stroke="#e0a521"/>`),
+      carrito: s(`<path d="M5 9h5l4 21h22l4-15H12" fill="none"/><path d="M13 15h27l-4 15H14z" fill="#d8dfe8"/>${dot(17, 37, 3, '#5d6b7a')}${dot(33, 37, 3, '#5d6b7a')}<rect x="17" y="10" width="7" height="9" rx="1.5" fill="#8ed49f"/><circle cx="29" cy="14" r="4" fill="#ef6b5b"/><rect x="31" y="16" width="5" height="8" rx="1" fill="#ffd75e" display="none"/>`),
+      auto: s(`<path d="M9 27l3.5-9a3 3 0 0 1 2.8-2h17.4a3 3 0 0 1 2.8 2L39 27" fill="#a8d8f0"/><rect x="6" y="26" width="36" height="9" rx="3" fill="#e86a5a"/>${dot(14, 36, 4, '#3f4a57')}${dot(34, 36, 4, '#3f4a57')}<path d="M24 16v10" /><circle cx="10.5" cy="30" r="1.5" fill="#ffe08a"/><circle cx="37.5" cy="30" r="1.5" fill="#ffe08a"/>`),
+      bomba: s(`<rect x="9" y="10" width="20" height="30" rx="2.5" fill="#e86a5a"/><rect x="13" y="14" width="12" height="8" rx="1.2" fill="#dff1fb"/><rect x="7" y="38" width="24" height="4" rx="1" fill="#93a3b8"/><path d="M29 18h4l3 4v12a3 3 0 0 1-6 0v-5h-1" fill="none"/>`),
+      escudo: s(`<path d="M24 6 39 11v11c0 9.5-6.5 16.5-15 20-8.5-3.5-15-10.5-15-20V11z" fill="#6aa7e8"/><path d="M17 24l5 5 9-10" stroke="#fff" stroke-width="3"/>`),
+      salud: s(`<path d="M24 40S7 30 7 18a9 9 0 0 1 17-4 9 9 0 0 1 17 4c0 12-17 22-17 22z" fill="#ef6b7b"/><path d="M24 19v11M18.5 24.5h11" stroke="#fff" stroke-width="3.2"/>`),
+      birrete: s(`<path d="M24 10 4 19l20 9 20-9z" fill="#4a5d7c"/><path d="M12 23v8c0 3 5.5 6 12 6s12-3 12-6v-8l-12 5z" fill="#3a4a63"/><path d="M40 20.5V31" stroke="#f6c955" stroke-width="2.4"/><circle cx="40" cy="33" r="2.2" fill="#f6c955"/>`),
+      hamburguesa: s(`<path d="M8 21c0-7 7-12 16-12s16 5 16 12z" fill="#f2b55c"/><path d="M7 24c3 2 5-1 8 0s4 2 7 0 4 1 7 0 5-2 7 0 5 1 5-1v1H7z" fill="#7cc66e"/><rect x="7" y="26" width="34" height="5" rx="2.5" fill="#9b5a3c"/><path d="M8 33h32c0 4-3 6-6 6H14c-3 0-6-2-6-6z" fill="#f2b55c"/>${dot(18, 15, 0.9, O)}${dot(25, 13, 0.9, O)}${dot(30, 16, 0.9, O)}`),
+      taza: s(`<path d="M9 18h24v12a9 9 0 0 1-9 9h-6a9 9 0 0 1-9-9z" fill="#f4f1ec"/><path d="M33 21h3a4.5 4.5 0 0 1 0 9h-3" fill="none"/><path d="M12 22h18v7a6 6 0 0 1-6 6h-6a6 6 0 0 1-6-6z" fill="#9b6a43" stroke="none"/><path d="M16 9c-1.5 2 1.5 3 0 5M22 8c-1.5 2 1.5 3 0 5M28 9c-1.5 2 1.5 3 0 5" stroke="#9aa6b3" stroke-width="1.8"/>`),
+      palomitas: s(`${dot(16, 15, 5, '#fff4c2')}${dot(24, 12, 5.5, '#fff4c2')}${dot(32, 15, 5, '#fff4c2')}${dot(20, 18, 4.5, '#ffe08a')}${dot(28, 18, 4.5, '#ffe08a')}<path d="M11 19h26l-3 21H14z" fill="#fff"/><path d="M17 19l1.5 21M24 19v21M31 19l-1.5 21" stroke="#e8564b" stroke-width="3"/><path d="M11 19h26l-3 21H14z" fill="none"/>`),
+      bolsa: s(`<path d="M10 16h28l-2 24H12z" fill="#b48be8"/><path d="M18 20v-5a6 6 0 0 1 12 0v5" fill="none"/>${dot(18, 20, 1.6, O)}${dot(30, 20, 1.6, O)}`),
+      pantalla: s(`<rect x="5" y="9" width="38" height="25" rx="3" fill="#3d4f6b"/><path d="M21 16v11l9-5.5z" fill="#ef6b5b"/><path d="M17 40h14M24 34v6" />`),
+      regalo: s(`<rect x="8" y="20" width="32" height="20" rx="2" fill="#ef6b5b"/><rect x="6" y="14" width="36" height="8" rx="2" fill="#f27e70"/><rect x="21" y="14" width="6" height="26" fill="#ffd75e"/><path d="M24 14c-3-6-11-6-9-1 1 2 5 1 9 1zM24 14c3-6 11-6 9-1-1 2-5 1-9 1z" fill="#ffd75e"/>`),
+      playera: s(`<path d="M17 8l-11 6 4 8 5-2v20h18V20l5 2 4-8-11-6c-1 3-3.5 5-7 5s-6-2-7-5z" fill="#6aa7e8"/>`),
+      huella: s(`<path d="M24 25c-6 0-11 6-11 10.5 0 3 2.5 4.5 5 4.5 2.5 0 3.7-1.5 6-1.5s3.5 1.5 6 1.5c2.5 0 5-1.5 5-4.5C35 31 30 25 24 25z" fill="#f0a35e"/><ellipse cx="13" cy="20" rx="3.6" ry="4.5" fill="#f0a35e"/><ellipse cx="20" cy="13" rx="3.6" ry="4.6" fill="#f0a35e"/><ellipse cx="28" cy="13" rx="3.6" ry="4.6" fill="#f0a35e"/><ellipse cx="35" cy="20" rx="3.6" ry="4.5" fill="#f0a35e"/>`),
+      pesa: s(`<rect x="4" y="18" width="5" height="12" rx="1.5" fill="#5d6b7a"/><rect x="9" y="14" width="6" height="20" rx="1.5" fill="#8a97a6"/><rect x="33" y="14" width="6" height="20" rx="1.5" fill="#8a97a6"/><rect x="39" y="18" width="5" height="12" rx="1.5" fill="#5d6b7a"/><rect x="15" y="21.5" width="18" height="5" fill="#c3cdd9"/>`),
+      avion: s(`<path d="M42 8c-2-2-5-1-7 1l-6 6-17-5-3 3 13 9-6 7-5-1-2 2 6 4 4 6 2-2-1-5 7-6 9 13 3-3-5-17 6-6c2-2 3-5 1-7z" fill="#a8d8f0"/>`),
+      telefono: s(`<rect x="14" y="5" width="20" height="38" rx="4" fill="#3d4f6b"/><rect x="17" y="10" width="14" height="25" rx="1.5" fill="#a8d8f0"/>${dot(24, 39, 1.6, '#c3cdd9')}`),
+      bolsaDinero: s(`<path d="M18 13h12l-2-6h-8z" fill="#c9965b"/><path d="M19 13c-8 5-12 12-12 18 0 6 5 10 17 10s17-4 17-10c0-6-4-13-12-18z" fill="#d9aa6f"/><path d="M18 13h12" />${usd(24, 33, 14, '#7a5326')}`),
+      cartera: s(`<rect x="10" y="9" width="24" height="14" rx="2" fill="#8ed49f" transform="rotate(-8 22 16)"/><rect x="6" y="15" width="36" height="25" rx="4" fill="#a8693f"/><path d="M42 23h-9a4.5 4.5 0 0 0 0 9h9z" fill="#8a5432"/>${dot(33.5, 27.5, 1.6, '#f6c955')}`),
+      maletin: s(`<path d="M18 13v-3a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3" fill="none"/><rect x="6" y="13" width="36" height="26" rx="3.5" fill="#a8693f"/><path d="M6 23h36" /><rect x="21" y="20" width="6" height="6" rx="1" fill="#f6c955"/>`),
+      monedas: s(`<ellipse cx="18" cy="33" rx="10" ry="4" fill="#e0a521"/><path d="M8 27v6c0 2.2 4.5 4 10 4s10-1.8 10-4v-6" fill="#f6c955"/><ellipse cx="18" cy="27" rx="10" ry="4" fill="#f6c955"/><circle cx="32" cy="19" r="10" fill="#f6c955"/><circle cx="32" cy="19" r="7" fill="none" stroke="#d9a62a" stroke-width="1.4"/>${usd(32, 23.5, 11, '#9a7312')}`),
+      grafica: s(`<line x1="7" y1="39" x2="41" y2="39" stroke="#9aa6b3" stroke-width="2"/><rect x="9" y="27" width="6.5" height="12" rx="1.2" fill="#6cc0d6"/><rect x="18.5" y="21" width="6.5" height="18" rx="1.2" fill="#67b48e"/><rect x="28" y="15" width="6.5" height="24" rx="1.2" fill="#8ed49f"/><path d="M11 24l8-5 7 3 9-8" stroke="#e0693f" stroke-width="2.4"/><path d="M28 14h6.5v6" stroke="#e0693f" stroke-width="2.4"/>`),
+      recibo: s(`<path d="M11 6h26v36l-4.3-3-4.4 3-4.3-3-4.3 3-4.4-3L11 42z" fill="#fff"/><path d="M17 15h14M17 21h14M17 27h9" stroke="#9aa6b3" stroke-width="2"/>${usd(31, 33, 9, '#4f9e68')}`)
+    };
+  })();
+  const REGLAS_CAT = [
+    [/gasolin|combustib|diesel/, 'bomba'],
+    [/vivienda|renta|casa|hipoteca|alquiler|mantenimiento/, 'casa'],
+    [/servicio|luz|agua|electric|gas-natural|basura/, 'foco'],
+    [/super|despensa|mandado|abarrote|walmart|costco|heb/, 'carrito'],
+    [/transporte|auto|carro|coche|uber|taxi|estacionamiento|peaje|lyft/, 'auto'],
+    [/seguro/, 'escudo'],
+    [/salud|medic|doctor|farmacia|dentist|hospital|clinica/, 'salud'],
+    [/educa|escuela|colegiatura|curso|libro|universidad/, 'birrete'],
+    [/cafe|starbucks|cafeteria/, 'taza'],
+    [/restaurant|comida|cena|desayuno|almuerzo|antojo|taco|pizza|delivery/, 'hamburguesa'],
+    [/entreten|cine|diversion|juego|concierto|fiesta|bar/, 'palomitas'],
+    [/suscrip|netflix|spotify|streaming|apple|disney|hbo|youtube/, 'pantalla'],
+    [/regalo|donacion|cumple/, 'regalo'],
+    [/ropa|zapato|calzado|vestido/, 'playera'],
+    [/mascota|perro|gato|veterin/, 'huella'],
+    [/gym|gimnasio|deporte|fitness/, 'pesa'],
+    [/viaje|vuelo|hotel|vacacion|avion/, 'avion'],
+    [/telefono|celular|internet|cable|movil/, 'telefono'],
+    [/compra|amazon|tienda|shopping/, 'bolsa'],
+    [/prestamo|deuda|credito|hipoteca/, 'bolsaDinero'],
+    [/sueldo|salario|nomina|quincena|pago-de-trabajo/, 'cartera'],
+    [/negocio|venta|freelance|cliente|empresa/, 'maletin'],
+    [/inversion|interes|dividend|rendimiento/, 'grafica']
+  ];
+  function iconoCat(c) {
+    if (!c) return ICAT.recibo;
+    if (c.id === CAT_PREST) return ICAT.bolsaDinero;
+    const n = slug(c.nombre || '');
+    for (const [re, k] of REGLAS_CAT) if (re.test(n)) return ICAT[k];
+    return c.tipo === 'ingreso' ? ICAT.monedas : ICAT.recibo;
+  }
   const TIPOS_CUENTA = {
     cheques: { n: 'Cuenta de cheques', c: 'blue', i: 'banco' },
     ahorro: { n: 'Cuenta de ahorro', c: 'green', i: 'caja' },
@@ -1152,7 +1219,7 @@
   // ================= Componentes =================
   const encabezado = (titulo, eyebrow, acciones = '', sub = '') => `<header class="vh"><div>${eyebrow ? `<p class="eyebrow">${esc(eyebrow)}</p>` : ''}<h1 class="lt">${esc(titulo)}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div><div class="vh-act">${acciones}</div></header>`;
   const mnav = (act, ym) => `<div class="mnav"><button class="icon-btn" type="button" data-act="${act}" data-d="-1" aria-label="Mes anterior">${IC.izq}</button><strong>${esc(nombreMes(ym))}</strong><button class="icon-btn" type="button" data-act="${act}" data-d="1" aria-label="Mes siguiente">${IC.der}</button></div>`;
-  const icCat = (c) => `<span class="ic" style="--c:var(--c-${c ? c.color : 'gray'})">${esc((c ? c.nombre : '?').charAt(0))}</span>`;
+  const icCat = (c) => `<span class="ic ic-color">${iconoCat(c)}</span>`;
   const icCuenta = (c) => `<span class="ic sq ic-color">${ICC[c.tipo] || ICC.cheques}</span>`;
   const btnMas = (act, label) => `<button class="icon-btn" type="button" data-act="${act}" aria-label="${esc(label)}">${IC.plus}</button>`;
 
@@ -1261,7 +1328,7 @@
     if (tjs.length) html += `<section class="section"><div class="sh"><h2>Pagos de tarjeta</h2></div><div class="group">${tjs.map(({ c, e }) => {
       const d = diasHasta(e.venc), urg = e.estado === 'vencida' ? 'red' : e.estado === 'pendiente' && d <= 3 ? 'orange' : e.estado === 'pagada' ? 'green' : 'orange';
       const sub = e.estado === 'pagada' ? `Pagada · próximo pago ${fCorta(e.venc)}` : e.estado === 'vencida' ? `Venció el ${fCorta(e.venc)}` : `${cuandoTxt(e.venc)}${e.abonado > 0.005 ? ` · abonaste ${money(e.abonado)} de ${money(e.total)}` : ''}`;
-      return `<div class="row" data-act="ver-mov-cuenta" data-id="${c.id}" style="cursor:pointer; flex-wrap:wrap; row-gap:8px"><span class="ic sq" style="--c:var(--c-${urg})">${e.estado === 'pagada' ? IC.check : IC.tarjeta}</span><span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2 ${e.estado === 'vencida' ? 'neg' : ''}">${esc(sub)}</span></span><span class="amt ${e.estado === 'vencida' ? 'neg' : ''}">${e.estado === 'pagada' ? money(0) : money(e.porPagar)}<small>${e.estado === 'pagada' ? 'por pagar' : e.corte ? 'del corte' : 'deuda total'}</small></span>${e.estado !== 'pagada' ? `<div style="width:100%; padding:0 0 4px 46px"><button class="btn small" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e.porPagar.toFixed(2)}">Pagar ${money(e.porPagar)}</button></div>` : ''}</div>`;
+      return `<div class="row" data-act="ver-mov-cuenta" data-id="${c.id}" style="cursor:pointer; flex-wrap:wrap; row-gap:8px"><span class="ic sq ic-color">${ICC.tarjeta}</span><span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2 ${e.estado === 'vencida' ? 'neg' : ''}">${esc(sub)}</span></span><span class="amt ${e.estado === 'vencida' ? 'neg' : ''}">${e.estado === 'pagada' ? money(0) : money(e.porPagar)}<small>${e.estado === 'pagada' ? 'por pagar' : e.corte ? 'del corte' : 'deuda total'}</small></span>${e.estado !== 'pagada' ? `<div style="width:100%; padding:0 0 4px 46px"><button class="btn small" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e.porPagar.toFixed(2)}">Pagar ${money(e.porPagar)}</button></div>` : ''}</div>`;
     }).join('')}</div></section>`;
     const pc = porConfirmar();
     if (pc.length) html += `<section class="section"><div class="sh"><h2>Por confirmar</h2></div><div class="group">${pc.slice(0, 6).map(({ r, f }) => filaRec(r, f, true)).join('')}</div></section>`;
