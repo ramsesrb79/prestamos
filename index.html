@@ -301,6 +301,31 @@
   .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--fill); border-radius: 9px; padding: 2px; }
   .seg button { border: 0; background: none; padding: 7px 6px; border-radius: 7px; font: 500 14px var(--font); color: var(--label); cursor: pointer; }
   .seg button.on { background: var(--seg-on); box-shadow: 0 3px 8px rgba(0, 0, 0, .12), 0 3px 1px rgba(0, 0, 0, .04); font-weight: 600; }
+  #print-area { display: none; }
+  .rep { background: #fff; color: #1c1c1e; padding: 20px; font: 400 13px var(--font); }
+  .rep .rep-head { margin-bottom: 6px; }
+  .rep h1 { font: 700 22px var(--font); margin: 0; color: #000; }
+  .rep .rep-sub { color: #6b6b70; font-size: 12.5px; margin: 2px 0 0; }
+  .rep h2 { font: 700 14px var(--font); margin: 18px 0 7px; padding-bottom: 4px; border-bottom: 2px solid #1c1c1e; color: #000; }
+  .rep .kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 20px; max-width: 460px; }
+  .rep .kv span { color: #3a3a3c; }
+  .rep .kv b { font-weight: 600; color: #000; }
+  .rep table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 2px; }
+  .rep th { text-align: left; color: #6b6b70; font-weight: 600; border-bottom: 1px solid #c7c7cc; padding: 5px 7px; }
+  .rep td { padding: 5px 7px; border-bottom: 1px solid #ececef; vertical-align: top; }
+  .rep .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .rep .neg { color: #c0362c; }
+  .rep .pos { color: #1a7f37; }
+  .rep tr.op td { color: #6b6b70; }
+  .rep tr.sumrow td { font-weight: 700; border-top: 1.5px solid #1c1c1e; border-bottom: none; color: #000; }
+  @media print {
+    html, body { background: #fff !important; }
+    body > *:not(#print-area) { display: none !important; }
+    #print-area { display: block !important; }
+    .rep { padding: 0; }
+    .rep h2, .rep tr { break-inside: avoid; }
+    @page { margin: 14mm; }
+  }
   .monto { display: flex; justify-content: center; align-items: baseline; gap: 2px; padding: 4px 0; }
   .monto span { font: 600 34px var(--font-r); color: var(--label-2); }
   .monto input { width: 100%; max-width: 280px; border: 0; background: none; text-align: center; font: 700 48px/1.1 var(--font-r); color: var(--label); padding: 0; }
@@ -386,6 +411,7 @@
 <div class="lock" id="lock" hidden><div class="lock-in"><span class="brand-ic lock-ic">$</span><div id="lk-box" style="width:100%"></div><button class="link sm" type="button" id="lk-olvide">¿Olvidaste tu código?</button></div></div>
 <div class="toast" id="toast" hidden></div>
 <input type="file" id="archivo" accept=".json,application/json" hidden>
+<div id="print-area" aria-hidden="true"></div>
 
 <script>
 (() => {
@@ -1909,12 +1935,109 @@
   }
   function hayDatos() { return S.cuentas.length || S.movimientos.length || S.prestamos.length || S.metas.length || S.recurrentes.length || S.config.ingresoMensual; }
   function estadoCopia() { const c = textoCopia(); document.querySelectorAll('[data-dot]').forEach((d) => { d.hidden = c.ok || !hayDatos(); }); }
+  // ================= Reporte / Estado de cuenta =================
+  let repTipo = 'mes', repPer = ymHoy();
+  const TIPO_MOV_R = { gasto: 'Gasto', ingreso: 'Ingreso', devolucion: 'Devolución', transferencia: 'Transferencia' };
+  const fRep = (f) => parseISO(f).toLocaleDateString('es-MX');
+  function descReporte(x, cid) {
+    if (x.nota) return x.nota;
+    if (x.tipo === 'transferencia') { const otra = x.cuentaId === cid ? cuenta(x.cuentaDestinoId) : cuenta(x.cuentaId); return (x.cuentaId === cid ? 'Transferencia a ' : 'Transferencia de ') + (otra ? otra.nombre : '—'); }
+    const c = cat(x.categoriaId); return c ? c.nombre : TIPO_MOV_R[x.tipo];
+  }
+  function reporteDatos(tipo, per) {
+    const ini = tipo === 'mes' ? per + '-01' : per + '-01-01';
+    const fin = tipo === 'mes' ? per + '-' + pad(diasDelMes(per)) : per + '-12-31';
+    const antes = isoDe(new Date(parseISO(ini) - 864e5));
+    const titulo = tipo === 'mes' ? cap(parseISO(ini).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })) : ('Año ' + per);
+    let ing = 0, gas = 0; const porCat = {};
+    S.movimientos.forEach((x) => {
+      if (x.fecha < ini || x.fecha > fin || x.tipo === 'transferencia') return;
+      if (x.tipo === 'ingreso') { ing += x.monto; return; }
+      const signo = x.tipo === 'devolucion' ? -1 : 1, k = x.categoriaId || '_g';
+      gas += signo * x.monto; porCat[k] = (porCat[k] || 0) + signo * x.monto;
+    });
+    const cuentas = S.cuentas.map((c) => {
+      if (c.tipo === 'retiro') {
+        const prev = (c.historial || []).filter((e) => e.f < ini);
+        const apertura = prev.length ? prev[prev.length - 1].v : ((c.historial || []).length ? c.historial[0].v : c.saldoInicial);
+        const movs = (c.historial || []).filter((h) => h.f >= ini && h.f <= fin).map((h) => ({ fecha: h.f, desc: 'Actualización de saldo', cat: '', monto: null, saldo: h.v }));
+        return { c, apertura, cierre: movs.length ? movs[movs.length - 1].saldo : apertura, movs };
+      }
+      const apertura = saldoAl(c, antes);
+      const lista = S.movimientos.filter((x) => (x.cuentaId === c.id || x.cuentaDestinoId === c.id) && x.fecha >= ini && x.fecha <= fin).sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.creado || '').localeCompare(b.creado || ''));
+      let run = apertura; const movs = lista.map((x) => { const e = efecto(x, c.id); run += e; const ca = cat(x.categoriaId); return { fecha: x.fecha, desc: descReporte(x, c.id), cat: x.tipo === 'transferencia' ? 'Transferencia' : (ca ? ca.nombre : ''), monto: e, saldo: run }; });
+      return { c, apertura, cierre: run, movs };
+    });
+    return { tipo, per, ini, fin, titulo, ing, gas, porCat, patIni: patrimonioEn(antes), patFin: patrimonioEn(fin), cuentas };
+  }
+  const signo$ = (v) => (v < -0.005 ? '−' : '') + fmtNum(Math.abs(v));
+  function filaMovRep(m) {
+    return `<tr><td>${fRep(m.fecha)}</td><td>${esc(m.desc)}</td><td>${esc(m.cat || '')}</td><td class="num ${m.monto < 0 ? 'neg' : m.monto > 0 ? 'pos' : ''}">${m.monto === null ? '' : (m.monto > 0 ? '+' : m.monto < 0 ? '−' : '') + fmtNum(Math.abs(m.monto))}</td><td class="num">${signo$(m.saldo)}</td></tr>`;
+  }
+  function reporteHTML(d) {
+    const flujo = d.ing - d.gas, cambio = d.patFin - d.patIni;
+    const cats = Object.entries(d.porCat).map(([k, v]) => ({ n: (cat(k) ? cat(k).nombre : 'Sin categoría'), v })).filter((x) => Math.abs(x.v) > 0.005).sort((a, b) => b.v - a.v);
+    let h = `<div class="rep-head"><h1>Mis Finanzas</h1><p class="rep-sub">Estado de cuenta · ${esc(d.titulo)}</p><p class="rep-sub">Generado el ${fRep(hoyISO())}</p></div>`;
+    h += `<h2>Resumen</h2><div class="kv"><span>Patrimonio al inicio</span><b class="num">${signo$(d.patIni)}</b><span>Ingresos</span><b class="num pos">+${fmtNum(d.ing)}</b><span>Gastos</span><b class="num neg">−${fmtNum(d.gas)}</b><span>Flujo del periodo</span><b class="num ${flujo < 0 ? 'neg' : 'pos'}">${flujo < 0 ? '−' : '+'}${fmtNum(Math.abs(flujo))}</b><span>Patrimonio al cierre</span><b class="num">${signo$(d.patFin)}</b><span>Cambio en patrimonio</span><b class="num ${cambio < 0 ? 'neg' : 'pos'}">${cambio < 0 ? '−' : '+'}${fmtNum(Math.abs(cambio))}</b></div>`;
+    if (cats.length) h += `<h2>Gastos por categoría</h2><table><thead><tr><th>Categoría</th><th class="num">Monto</th></tr></thead><tbody>${cats.map((c) => `<tr><td>${esc(c.n)}</td><td class="num">${signo$(c.v)}</td></tr>`).join('')}</tbody></table>`;
+    d.cuentas.forEach((a) => {
+      h += `<h2>${esc(a.c.nombre)} · ${esc(TIPOS_CUENTA[a.c.tipo].n)}</h2>`;
+      h += `<table><thead><tr><th>Fecha</th><th>Descripción</th><th>Categoría</th><th class="num">Monto</th><th class="num">Saldo</th></tr></thead><tbody>`;
+      h += `<tr class="op"><td></td><td>Saldo inicial</td><td></td><td class="num"></td><td class="num">${signo$(a.apertura)}</td></tr>`;
+      h += a.movs.map(filaMovRep).join('');
+      h += `<tr class="sumrow"><td></td><td>Saldo final</td><td></td><td class="num"></td><td class="num">${signo$(a.cierre)}</td></tr>`;
+      h += `</tbody></table>`;
+      if (!a.movs.length) h += `<p class="rep-sub" style="margin-top:4px">Sin movimientos en el periodo.</p>`;
+    });
+    return `<div class="rep">${h}</div>`;
+  }
+  function reporteCSV(d) {
+    const q = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+    const filas = [['Fecha', 'Cuenta', 'Descripción', 'Categoría', 'Monto', 'Saldo']];
+    d.cuentas.forEach((a) => { a.movs.forEach((m) => filas.push([m.fecha, a.c.nombre, m.desc, m.cat || '', m.monto === null ? '' : m.monto.toFixed(2), m.saldo.toFixed(2)])); });
+    return '﻿' + filas.map((r) => r.map(q).join(',')).join('\r\n');
+  }
+  async function bajarArchivo(nombre, texto, mime) {
+    let dl = null; try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) {}
+    if (dl) { try { await dl.save({ filename: nombre, data: texto }); toast('Archivo guardado'); } catch (e) { if (!(e && e.code === 'declined')) toast('No se pudo guardar el archivo.'); } return; }
+    const tactil = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    if (tactil && navigator.canShare) { try { const f = new File([texto], nombre, { type: mime }); if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f] }); return; } } catch (e) { if (e && e.name === 'AbortError') return; } }
+    try { const url = URL.createObjectURL(new Blob([texto], { type: mime })); const a = document.createElement('a'); a.href = url; a.download = nombre; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); toast('Archivo guardado'); } catch (e) { toast('No se pudo guardar el archivo.'); }
+  }
+  function imprimirReporte() {
+    document.getElementById('print-area').innerHTML = reporteHTML(reporteDatos(repTipo, repPer));
+    setTimeout(() => { try { window.print(); } catch (e) { toast('Tu navegador no permitió imprimir aquí.'); } }, 80);
+  }
+  function sheetReporte() {
+    const b = abrirSheet(`${cabeza('Estado de cuenta', false)}<div style="display:grid; gap:14px">
+      <div class="seg" id="rep-seg"><button type="button" class="${repTipo === 'mes' ? 'on' : ''}" data-t="mes">Por mes</button><button type="button" class="${repTipo === 'anio' ? 'on' : ''}" data-t="anio">Por año</button></div>
+      <div class="mnav"><button class="icon-btn" type="button" id="rep-prev" aria-label="Anterior">${IC.izq}</button><strong id="rep-lbl"></strong><button class="icon-btn" type="button" id="rep-next" aria-label="Siguiente">${IC.der}</button></div>
+      <div class="sheet-actions"><button class="btn block" type="button" id="rep-pdf">Guardar PDF</button><button class="btn block tinted" type="button" id="rep-csv">Exportar Excel</button></div>
+      <p class="note" style="margin:0">«Guardar PDF» abre la vista de impresión del teléfono; ahí elige «Guardar en Archivos» o compartir como PDF. «Exportar Excel» baja un archivo que abre en Excel o Numbers.</p>
+      <div id="rep-prev-box" style="overflow:auto; border-radius:12px; max-height:46vh; -webkit-overflow-scrolling:touch"></div>
+    </div>`);
+    function pintarReporte() {
+      const d = reporteDatos(repTipo, repPer), h = reporteHTML(d);
+      $('#rep-lbl', b).textContent = d.titulo;
+      $('#rep-prev-box', b).innerHTML = h;
+      document.getElementById('print-area').innerHTML = h;
+    }
+    const navPer = (dir) => { if (repTipo === 'mes') repPer = addMes(repPer, dir); else repPer = String(+repPer + dir); pintarReporte(); };
+    $('#rep-seg', b).addEventListener('click', (e) => { const t = e.target.closest('[data-t]'); if (!t) return; repTipo = t.dataset.t; if (repTipo === 'anio') repPer = repPer.slice(0, 4); else if (repPer.length === 4) repPer = repPer + '-' + pad(new Date().getMonth() + 1); [...$('#rep-seg', b).children].forEach((x) => x.classList.toggle('on', x.dataset.t === repTipo)); pintarReporte(); });
+    $('#rep-prev', b).addEventListener('click', () => navPer(-1));
+    $('#rep-next', b).addEventListener('click', () => navPer(1));
+    $('#rep-pdf', b).addEventListener('click', () => imprimirReporte());
+    $('#rep-csv', b).addEventListener('click', () => { const d = reporteDatos(repTipo, repPer); bajarArchivo('estado-' + repPer + '.csv', reporteCSV(d), 'text/csv'); });
+    pintarReporte();
+  }
+
   function sheetAjustes() {
     const c = textoCopia(), lk = lockCfg();
     const b = abrirSheet(`${cabeza('Ajustes y copia', false)}<div style="display:grid; gap:18px">
       <div class="group"><div class="row plain" style="cursor:default"><span class="ic" style="--c:var(--c-${c.ok ? 'green' : 'orange'})">${c.ok ? IC.check : '!'}</span><span class="rt"><span class="t1">${esc(c.t)}</span><span class="t2">Tus datos se guardan solo en este dispositivo</span></span></div></div>
       <div class="sheet-actions"><button class="btn block" type="button" data-act="guardar-copia">Guardar copia</button><button class="btn block tinted" type="button" data-act="abrir-copia">Abrir copia</button></div>
       <p class="note" style="margin-top:0">«Guardar copia» crea el archivo <b>mis-finanzas.json</b>${cifradoOk ? ', cifrado con tu contraseña de copias' : ''}. Guárdalo donde prefieras: iCloud Drive, Google Drive, OneDrive o tu computadora. En otro dispositivo, usa «Abrir copia» para cargar todo.</p>
+      <div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Reportes</p><div class="group"><button class="row plain" type="button" data-act="reporte"><span class="rt"><span class="t1">Estado de cuenta</span><span class="t2">Resumen y movimientos en PDF o Excel, por mes o año</span></span><span class="amt" style="color:var(--tint)">Ver</span></button></div></div>
       <div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Copias automáticas</p><div class="group">
         <div class="frow"><label for="z-rec">Recordarme</label><select id="z-rec">${[[1, 'Cada día'], [7, 'Cada semana'], [14, 'Cada 2 semanas'], [30, 'Cada mes'], [0, 'Nunca']].map(([v, n]) => `<option value="${v}" ${S.config.recordatorioDias === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
         <button class="row plain" type="button" id="z-snaps"><span class="rt"><span class="t1">Copias en este dispositivo</span><span class="t2">Una por cada día que abres la app · últimas ${MAX_SNAPS}</span></span><span class="amt" style="color:var(--tint)">Ver</span></button>
@@ -2193,6 +2316,7 @@
     'prest-volver': () => { prestAbierto = null; render(); window.scrollTo(0, 0); },
     'cerrar-sheet': () => cerrarSheet(),
     'guardar-copia': () => guardarCopia(),
+    'reporte': () => sheetReporte(),
     'posponer-copia': () => { lsSet('copia_pospuesta', Date.now()); render(); toast('Te lo recuerdo mañana'); },
     'abrir-copia': () => $('#archivo').click(),
     'borrar-todo': async () => {
