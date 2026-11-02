@@ -1056,6 +1056,24 @@
     while (ym <= cur && meses.length < 60) { meses.push(ym); ym = addMes(ym, 1); }
     return (meses.length > 24 ? meses.slice(-24) : meses).map((m) => ({ ym: m, v: patrimonioEn(m === cur ? hoy : m + '-' + pad(diasDelMes(m))) }));
   }
+  function efectoLiq(x, ids) {
+    if (x.tipo === 'gasto') return ids.has(x.cuentaId) ? -x.monto : 0;
+    if (x.tipo === 'ingreso' || x.tipo === 'devolucion') return ids.has(x.cuentaId) ? x.monto : 0;
+    return (ids.has(x.cuentaDestinoId) ? x.monto : 0) + (ids.has(x.cuentaId) ? -x.monto : 0);
+  }
+  function proyeccion(nMeses) {
+    const liq = S.cuentas.filter((c) => c.tipo === 'cheques' || c.tipo === 'ahorro' || c.tipo === 'efectivo');
+    if (!liq.length) return null;
+    const ids = new Set(liq.map((c) => c.id)), hoy = hoyISO();
+    const meses = []; for (let i = 0; i < nMeses; i++) meses.push(addMes(ymHoy(), i));
+    const finH = meses[meses.length - 1] + '-' + pad(diasDelMes(meses[meses.length - 1]));
+    const net = {}; meses.forEach((m) => net[m] = 0);
+    S.movimientos.forEach((x) => { if (x.fecha > hoy && x.fecha <= finH) { const ym = x.fecha.slice(0, 7); if (ym in net) net[ym] += efectoLiq(x, ids); } });
+    S.recurrentes.forEach((r) => { proximas(r, finH, 400).forEach((f) => { if (f > hoy) { const ym = f.slice(0, 7); if (ym in net) net[ym] += efectoLiq(r, ids); } }); });
+    let bal = suma(liq.map((c) => saldoAl(c, hoy)));
+    const pts = meses.map((m) => { bal += net[m]; return { ym: m, v: bal, flujo: net[m] }; });
+    return { pts, min: pts.reduce((a, b) => (b.v < a.v ? b : a), pts[0]), hayFlujo: pts.some((p) => Math.abs(p.flujo) > 0.005) };
+  }
   function barrasPatrimonio(pts) {
     const W = 340, H = 176, L = 42, R = 8, T = 12, B = 26, ph = H - T - B, pw = W - L - R;
     const vals = pts.map((p) => p.v); let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
@@ -1078,7 +1096,7 @@
     const svg = hit.closest('svg'), card = hit.closest('.card'); if (!svg || !card) return;
     const i = +hit.dataset.pat;
     svg.querySelectorAll('[data-bar]').forEach((bb) => { bb.style.opacity = (+bb.dataset.bar === i ? '1' : '.38'); });
-    const sel = card.querySelector('#pat-sel'); if (sel) sel.innerHTML = `<b style="color:var(--label)">${esc(mesCorto(hit.dataset.ym))} ${hit.dataset.ym.slice(0, 4)}</b> · ${esc(money(+hit.dataset.v))}`;
+    const sel = card.querySelector('.chart-sel'); if (sel) sel.innerHTML = `<b style="color:var(--label)">${esc(mesCorto(hit.dataset.ym))} ${hit.dataset.ym.slice(0, 4)}</b> · ${esc(money(+hit.dataset.v))}`;
   }
 
   // ================= Gráficas =================
@@ -1242,7 +1260,9 @@
     html += `<section class="section"><div class="sh"><h2>Lo que tienes</h2><button class="link sm" type="button" data-act="tab" data-v="cuentas">Cuentas</button></div><div class="card"><p class="muted" style="font-size:15px">Patrimonio neto</p><p class="big ${pat.neto < -0.005 ? 'neg' : ''}" style="font:700 34px/1.15 var(--font-r)">${money(pat.neto)}</p>
       <dl class="kv"><div><dt>Bancos y efectivo</dt><dd>${money(pat.efectivo)}</dd></div>${pat.inv ? `<div><dt>Inversiones</dt><dd>${money(pat.inv)}</dd></div>` : ''}${pat.ret ? `<div><dt>Retiro</dt><dd>${money(pat.ret)}</dd></div>` : ''}<div><dt>Tarjetas de crédito</dt><dd class="${pat.tarj < -0.005 ? 'neg' : ''}">${money(pat.tarj)}</dd></div><div><dt>Préstamos</dt><dd class="${pat.prest > 0.005 ? 'neg' : ''}">${pat.prest > 0.005 ? '−' : ''}${moneyAbs(pat.prest)}</dd></div></dl></div></section>`;
     const serie = seriePatrimonio();
-    if (serie.length >= 2) { const dif = serie[serie.length - 1].v - serie[0].v, ult = serie[serie.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Patrimonio en el tiempo</h3><span class="${dif >= 0 ? 'pos' : 'neg'}" style="font-size:15px; font-weight:600">${dif >= 0 ? '+' : '−'}${moneyAbs(dif)}</span></div><p class="muted" id="pat-sel" style="font-size:14px; margin:0 0 8px"><b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}</p>${barrasPatrimonio(serie)}</section>`; }
+    if (serie.length >= 2) { const dif = serie[serie.length - 1].v - serie[0].v, ult = serie[serie.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Patrimonio en el tiempo</h3><span class="${dif >= 0 ? 'pos' : 'neg'}" style="font-size:15px; font-weight:600">${dif >= 0 ? '+' : '−'}${moneyAbs(dif)}</span></div><p class="muted chart-sel" style="font-size:14px; margin:0 0 8px"><b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}</p>${barrasPatrimonio(serie)}</section>`; }
+    const proy = proyeccion(6);
+    if (proy && proy.hayFlujo) { const neg = proy.min.v < -0.005, ult = proy.pts[proy.pts.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Pronóstico · 6 meses</h3></div><p class="${neg ? 'neg' : 'muted'} chart-sel" style="font-size:14px; margin:0 0 8px">${neg ? `Tu saldo baja a <b>${money(proy.min.v)}</b> en ${esc(mesCorto(proy.min.ym))} ${proy.min.ym.slice(0, 4)}` : `<b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}`}</p>${barrasPatrimonio(proy.pts)}<p class="note" style="margin:8px 0 0">Estimado del dinero en bancos y efectivo con tus movimientos programados. Toca una barra para ver cada mes.</p></section>`; }
 
     const gastosCat = Object.entries(d.st.porCat).map(([k, v]) => ({ c: cat(k), k, v })).filter((x) => (x.c ? x.c.tipo === 'gasto' : x.k === '_g') && x.v > 0).sort((a, b) => b.v - a.v);
     const top = gastosCat.slice(0, 5).map((x) => ({ v: x.v, color: x.c ? x.c.color : 'gray', n: x.c ? x.c.nombre : 'Sin categoría' }));
