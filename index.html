@@ -152,6 +152,14 @@
   .ic.ic-color { background: #eef0f4; }
   .ic.ic-color svg { width: 28px; height: 28px; }
   .sug-i .ic.ic-color svg { width: 22px; height: 22px; }
+  .icons-pick { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; width: 100%; }
+  .icons-pick label { position: relative; display: grid; justify-items: center; gap: 2px; cursor: pointer; }
+  .icons-pick input { position: absolute; opacity: 0; pointer-events: none; }
+  .icons-pick .ip-ic { width: 44px; height: 44px; border-radius: 50%; background: #eef0f4; display: grid; place-items: center; box-shadow: 0 0 0 2px transparent; transition: box-shadow .15s; }
+  .icons-pick .ip-ic svg { width: 30px; height: 30px; }
+  .icons-pick label.on .ip-ic { box-shadow: 0 0 0 2.5px var(--tint); }
+  .icons-pick .ip-t { font: 500 11px var(--font); color: var(--label-2); }
+  .icons-pick label.auto .ip-ic { opacity: .75; }
   .ic svg { width: 20px; height: 20px; }
   .add-row { color: var(--tint); }
   .add-row .ic { background: var(--tint-soft); color: var(--tint); }
@@ -565,11 +573,14 @@
   ];
   function iconoCat(c) {
     if (!c) return ICAT.recibo;
+    if (c.icono && ICAT[c.icono]) return ICAT[c.icono];
     if (c.id === CAT_PREST) return ICAT.bolsaDinero;
     const n = slug(c.nombre || '');
     for (const [re, k] of REGLAS_CAT) if (re.test(n)) return ICAT[k];
     return c.tipo === 'ingreso' ? ICAT.monedas : ICAT.recibo;
   }
+  const NOM_ICAT = { casa: 'Casa', foco: 'Servicios', carrito: 'Supermercado', auto: 'Auto', bomba: 'Gasolina', escudo: 'Seguro', salud: 'Salud', birrete: 'Educación', hamburguesa: 'Comida', taza: 'Café', palomitas: 'Entretenimiento', bolsa: 'Compras', pantalla: 'Suscripciones', regalo: 'Regalo', playera: 'Ropa', huella: 'Mascotas', pesa: 'Gimnasio', avion: 'Viajes', telefono: 'Teléfono', bolsaDinero: 'Préstamos', cartera: 'Sueldo', maletin: 'Negocio', monedas: 'Monedas', grafica: 'Inversión', recibo: 'Recibo' };
+  const opsIcono = (sel, auto) => `<div class="icons-pick"><label class="auto ${sel ? '' : 'on'}"><input type="radio" name="icono" value="" ${sel ? '' : 'checked'}><span class="ip-ic">${auto}</span><span class="ip-t">Auto</span></label>${Object.keys(ICAT).map((k) => `<label class="${sel === k ? 'on' : ''}" title="${NOM_ICAT[k] || k}"><input type="radio" name="icono" value="${k}" ${sel === k ? 'checked' : ''} aria-label="${NOM_ICAT[k] || k}"><span class="ip-ic">${ICAT[k]}</span></label>`).join('')}</div>`;
   const TIPOS_CUENTA = {
     cheques: { n: 'Cuenta de cheques', c: 'blue', i: 'banco' },
     ahorro: { n: 'Cuenta de ahorro', c: 'green', i: 'caja' },
@@ -673,7 +684,7 @@
     out.categorias = Array.isArray(s.categorias) && s.categorias.length
       ? s.categorias.filter((c) => c && c.id).map((c) => {
           const tipo = c.tipo === 'ingreso' ? 'ingreso' : 'gasto';
-          return { id: String(c.id), nombre: String(c.nombre || 'Categoría'), tipo, grupo: tipo === 'ingreso' ? 'ingreso' : (GRUPOS[c.grupo] ? c.grupo : 'gustos'), color: PALETA.includes(c.color) ? c.color : 'gray', presupuesto: Math.max(0, num(c.presupuesto)), sistema: c.id === CAT_PREST };
+          return { id: String(c.id), nombre: String(c.nombre || 'Categoría'), tipo, grupo: tipo === 'ingreso' ? 'ingreso' : (GRUPOS[c.grupo] ? c.grupo : 'gustos'), color: PALETA.includes(c.color) ? c.color : 'gray', presupuesto: Math.max(0, num(c.presupuesto)), sistema: c.id === CAT_PREST, icono: typeof c.icono === 'string' && ICAT[c.icono] ? c.icono : '' };
         })
       : categoriasBase();
     if (!out.categorias.some((c) => c.id === CAT_PREST)) out.categorias.push(categoriasBase().find((c) => c.id === CAT_PREST));
@@ -1944,21 +1955,27 @@
         ${tipo === 'gasto' ? `<div class="frow"><label for="k-grupo">Tipo de gasto</label><select id="k-grupo" ${sis ? 'disabled' : ''}>${Object.entries(GRUPOS).map(([k, n]) => `<option value="${k}" ${(c ? c.grupo : 'gustos') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
         <div class="frow"><label for="k-pres">Límite al mes</label><input id="k-pres" class="money" type="text" inputmode="numeric" placeholder="${(() => { const pr = c ? promediosCat(mesPres)[c.id] : null; return pr && S.config.limitesAuto ? 'Auto: ' + money(pr.v) : (S.config.limitesAuto ? 'Automático' : '0.00'); })()}" autocomplete="off" value="${sis ? fmtNum(cuotasMes(mesPres)) : (c && c.presupuesto ? fmtNum(c.presupuesto) : '')}" ${sis ? 'disabled' : ''}></div>` : ''}
         ${sis ? '' : `<div class="frow col"><span class="lbl">Color</span>${opsColor(c ? c.color : 'blue')}</div>`}
+        <div class="frow col"><span class="lbl">Icono</span>${opsIcono(c ? c.icono : '', iconoCat(c ? { ...c, icono: '' } : { nombre: '', tipo }))}</div>
       </div>
       <p class="note">${sis ? 'El límite de esta categoría es la suma de las cuotas de tus préstamos de este mes. Registra aquí tus pagos de préstamos para que el presupuesto los vea.' : tipo === 'gasto' ? (S.config.limitesAuto ? 'Déjalo vacío y la app pone el límite con el promedio de lo que gastaste en esta categoría en los últimos 3 meses. Escribe una cantidad solo si quieres fijarla. ' : '') + 'Necesidades: lo indispensable (renta, comida, luz). Gustos: lo que podrías recortar. Deudas: pagos de créditos.' : ''}</p>
       <p class="form-error" id="k-error" role="alert"></p>
       ${c && !sis ? '<button class="btn block destructive" type="button" id="k-borrar">Eliminar categoría</button>' : ''}
     </div></form>`);
+    const pick = b.querySelector('.icons-pick');
+    pick.addEventListener('change', () => { pick.querySelectorAll('label').forEach((l) => l.classList.toggle('on', l.querySelector('input').checked)); });
+    const nomInp = $('#k-nombre', b);
+    if (nomInp && !sis) nomInp.addEventListener('input', () => { const a = pick.querySelector('label.auto .ip-ic'); if (a) a.innerHTML = iconoCat({ nombre: nomInp.value, tipo, icono: '' }); });
     $('#form-cat', b).addEventListener('submit', (e) => {
       e.preventDefault();
-      if (sis) { cerrarSheet(); return; }
+      const icono = (b.querySelector('input[name="icono"]:checked') || {}).value || '';
+      if (sis) { c.icono = icono; guardar(); cerrarSheet(); toast('Categoría actualizada'); render(); return; }
       const nombre = $('#k-nombre', b).value.trim();
       if (!nombre) { $('#k-error', b).textContent = 'Escribe un nombre.'; return; }
       const color = (b.querySelector('input[name="color"]:checked') || {}).value || 'blue';
       const grupo = tipo === 'gasto' ? $('#k-grupo', b).value : 'ingreso';
       const pres = tipo === 'gasto' ? Math.max(0, parseMonto($('#k-pres', b).value) || 0) : 0;
-      if (c) Object.assign(c, { nombre, grupo, color, presupuesto: pres });
-      else S.categorias.push({ id: nuevoId('c'), nombre, tipo, grupo, color, presupuesto: pres, sistema: false });
+      if (c) Object.assign(c, { nombre, grupo, color, presupuesto: pres, icono });
+      else S.categorias.push({ id: nuevoId('c'), nombre, tipo, grupo, color, presupuesto: pres, sistema: false, icono });
       guardar(); cerrarSheet(); toast(c ? 'Categoría actualizada' : 'Categoría creada'); render();
     });
     if (c && !sis) $('#k-borrar', b).addEventListener('click', async () => {
