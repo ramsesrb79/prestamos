@@ -2078,7 +2078,7 @@
       };
       fila(null, 'Saldo inicial', '', '', money(a.apertura));
       a.movs.forEach((m) => fila(m.fecha, m.desc, m.cat, m.monto === null ? '' : (m.monto < 0 ? '-' : m.monto > 0 ? '+' : '') + money(Math.abs(m.monto)), money(m.saldo)));
-      linea(cF, y + 4, X1, y + 4, 0.5);
+      linea(cF, y + 9, X1, y + 9, 0.5);
       fila(null, 'Saldo final', '', '', money(a.cierre));
       if (!a.movs.length) { T(cD, 'Sin movimientos en el periodo.', 9, false); y -= 13; }
       y -= 14;
