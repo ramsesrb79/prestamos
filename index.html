@@ -2011,16 +2011,90 @@
     if (tactil && navigator.canShare) { try { const f = new File([texto], nombre, { type: mime }); if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f] }); return; } } catch (e) { if (e && e.name === 'AbortError') return; } }
     try { const url = URL.createObjectURL(new Blob([texto], { type: mime })); const a = document.createElement('a'); a.href = url; a.download = nombre; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); toast('Archivo guardado'); } catch (e) { toast('No se pudo guardar el archivo.'); }
   }
-  function imprimirReporte() {
-    document.getElementById('print-area').innerHTML = reporteHTML(reporteDatos(repTipo, repPer));
-    setTimeout(() => { try { window.print(); } catch (e) { toast('Tu navegador no permitió imprimir aquí.'); } }, 80);
+  // ----- Generador de PDF (fuente Helvetica, sin librerías) -----
+  const PDF_W = { ' ':278,'!':278,'"':355,'#':556,'$':556,'%':889,'&':667,"'":191,'(':333,')':333,'*':389,'+':584,',':278,'-':333,'.':278,'/':278,'0':556,'1':556,'2':556,'3':556,'4':556,'5':556,'6':556,'7':556,'8':556,'9':556,':':278,';':278,'<':584,'=':584,'>':584,'?':556,'@':1015 };
+  function anchoPDF(str, size) { let w = 0; for (const ch of str) w += (PDF_W[ch] != null ? PDF_W[ch] : (ch >= 'A' && ch <= 'Z' ? 700 : 556)); return w / 1000 * size; }
+  function latin1(str) {
+    let out = '';
+    for (let ch of String(str).replace(/−/g, '-').replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/…/g, '...').replace(/—/g, '-')) { const c = ch.charCodeAt(0); out += c <= 255 ? ch : '?'; }
+    return out.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  }
+  function fitPDF(str, maxW, size) { str = String(str); if (anchoPDF(str, size) <= maxW) return str; let s = str; while (s.length > 1 && anchoPDF(s + '...', size) > maxW) s = s.slice(0, -1); return s + '...'; }
+  function pdfEstado(d) {
+    const PW = 612, PH = 792, M = 48, X1 = PW - M;
+    const cF = 48, cD = 104, cC = 290, mR = 486, sR = 564, wD = cC - cD - 8, wC = 418 - cC;
+    const paginas = []; let ops = [], y = 0;
+    const nueva = () => { if (ops.length) paginas.push(ops); ops = []; y = PH - M; };
+    const T = (x, str, size, bold) => { ops.push(`BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x.toFixed(1)} ${y.toFixed(1)} Td (${latin1(str)}) Tj ET`); };
+    const TR = (xr, str, size, bold) => { T(xr - anchoPDF(String(str).replace(/−/g, '-'), size), str, size, bold); };
+    const linea = (x1, y1, x2, y2, gris) => ops.push(`${gris != null ? gris.toFixed(2) + ' G ' : ''}${x1.toFixed(1)} ${y1.toFixed(1)} m ${x2.toFixed(1)} ${y2.toFixed(1)} l S${gris != null ? ' 0 G' : ''}`);
+    nueva();
+    T(cF, 'Mis Finanzas', 18, true); y -= 18;
+    T(cF, 'Estado de cuenta - ' + d.titulo, 10.5, false); y -= 13;
+    T(cF, 'Generado el ' + fRep(hoyISO()), 9, false); y -= 22;
+    const seccion = (t) => { if (y < M + 40) nueva(); T(cF, t, 12, true); y -= 6; linea(cF, y, X1, y, 0.12); y -= 14; };
+    const resumen = [['Patrimonio al inicio', money(d.patIni)], ['Ingresos', '+' + money(d.ing)], ['Gastos', '-' + money(d.gas)], ['Flujo del periodo', (d.ing - d.gas < 0 ? '-' : '+') + money(Math.abs(d.ing - d.gas))], ['Patrimonio al cierre', money(d.patFin)], ['Cambio en patrimonio', (d.patFin - d.patIni < 0 ? '-' : '+') + money(Math.abs(d.patFin - d.patIni))]];
+    seccion('Resumen');
+    resumen.forEach(([k, v]) => { if (y < M + 16) { nueva(); } T(cF, k, 10, false); TR(X1, v, 10, false); y -= 15; });
+    y -= 8;
+    const cats = Object.entries(d.porCat).map(([k, v]) => ({ n: (cat(k) ? cat(k).nombre : 'Sin categoría'), v })).filter((x) => Math.abs(x.v) > 0.005).sort((a, b) => b.v - a.v);
+    if (cats.length) { seccion('Gastos por categoría'); cats.forEach((c) => { if (y < M + 16) nueva(); T(cF, fitPDF(c.n, 300, 10), 10, false); TR(X1, money(c.v), 10, false); y -= 15; }); y -= 8; }
+    const encTabla = () => { T(cF, 'Fecha', 8.5, true); T(cD, 'Descripción', 8.5, true); T(cC, 'Categoría', 8.5, true); TR(mR, 'Monto', 8.5, true); TR(sR, 'Saldo', 8.5, true); y -= 3; linea(cF, y, X1, y, 0.5); y -= 12; };
+    d.cuentas.forEach((a) => {
+      if (y < M + 56) nueva();
+      seccion(a.c.nombre + ' - ' + TIPOS_CUENTA[a.c.tipo].n); encTabla();
+      const fila = (fecha, desc, catn, monto, saldo) => {
+        if (y < M + 16) { nueva(); encTabla(); }
+        if (fecha) T(cF, fRep(fecha), 9, false);
+        T(cD, fitPDF(desc, wD, 9), 9, false);
+        if (catn) T(cC, fitPDF(catn, wC, 9), 9, false);
+        if (monto != null && monto !== '') TR(mR, monto, 9, false);
+        TR(sR, saldo, 9, false);
+        y -= 13;
+      };
+      fila(null, 'Saldo inicial', '', '', money(a.apertura));
+      a.movs.forEach((m) => fila(m.fecha, m.desc, m.cat, m.monto === null ? '' : (m.monto < 0 ? '-' : m.monto > 0 ? '+' : '') + money(Math.abs(m.monto)), money(m.saldo)));
+      linea(cF, y + 4, X1, y + 4, 0.5);
+      fila(null, 'Saldo final', '', '', money(a.cierre));
+      if (!a.movs.length) { T(cD, 'Sin movimientos en el periodo.', 9, false); y -= 13; }
+      y -= 14;
+    });
+    nueva();
+    // Ensamblar PDF
+    const nPag = paginas.length;
+    let next = 3;
+    const pageIds = [], contentIds = [];
+    paginas.forEach(() => { pageIds.push(next++); contentIds.push(next++); });
+    const f1 = next++, f2 = next++;
+    let pdf = '%PDF-1.4\n';
+    const off = []; const push = (id, body) => { off[id] = pdf.length; pdf += id + ' 0 obj\n' + body + '\nendobj\n'; };
+    push(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    push(2, '<< /Type /Pages /Count ' + nPag + ' /Kids [' + pageIds.map((i) => i + ' 0 R').join(' ') + '] >>');
+    paginas.forEach((pops, i) => {
+      const stream = pops.join('\n');
+      push(pageIds[i], '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + PW + ' ' + PH + '] /Resources << /Font << /F1 ' + f1 + ' 0 R /F2 ' + f2 + ' 0 R >> >> /Contents ' + contentIds[i] + ' 0 R >>');
+      push(contentIds[i], '<< /Length ' + stream.length + ' >>\nstream\n' + stream + '\nendstream');
+    });
+    push(f1, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+    push(f2, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+    const xref = pdf.length; const total = f2;
+    pdf += 'xref\n0 ' + (total + 1) + '\n0000000000 65535 f \n';
+    for (let i = 1; i <= total; i++) pdf += String(off[i]).padStart(10, '0') + ' 00000 n \n';
+    pdf += 'trailer\n<< /Size ' + (total + 1) + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF';
+    const bytes = new Uint8Array(pdf.length);
+    for (let i = 0; i < pdf.length; i++) bytes[i] = pdf.charCodeAt(i) & 0xff;
+    return bytes;
+  }
+  async function guardarPDF() {
+    try { const bytes = pdfEstado(reporteDatos(repTipo, repPer)); await bajarArchivo('estado-' + repPer + '.pdf', bytes, 'application/pdf'); }
+    catch (e) { toast('No se pudo crear el PDF.'); }
   }
   function sheetReporte() {
     const b = abrirSheet(`${cabeza('Estado de cuenta', false)}<div style="display:grid; gap:14px">
       <div class="seg" id="rep-seg"><button type="button" class="${repTipo === 'mes' ? 'on' : ''}" data-t="mes">Por mes</button><button type="button" class="${repTipo === 'anio' ? 'on' : ''}" data-t="anio">Por año</button></div>
       <div class="mnav"><button class="icon-btn" type="button" id="rep-prev" aria-label="Anterior">${IC.izq}</button><strong id="rep-lbl"></strong><button class="icon-btn" type="button" id="rep-next" aria-label="Siguiente">${IC.der}</button></div>
       <div class="sheet-actions"><button class="btn block" type="button" id="rep-pdf">Guardar PDF</button><button class="btn block tinted" type="button" id="rep-csv">Exportar Excel</button></div>
-      <p class="note" style="margin:0">«Guardar PDF» abre la vista de impresión del teléfono; ahí elige «Guardar en Archivos» o compartir como PDF. «Exportar Excel» baja un archivo que abre en Excel o Numbers.</p>
+      <p class="note" style="margin:0">«Guardar PDF» crea un archivo PDF con tu estado de cuenta; guárdalo o compártelo donde quieras. «Exportar Excel» baja un archivo que abre en Excel o Numbers.</p>
       <div id="rep-prev-box" style="overflow:auto; border-radius:12px; max-height:46vh; -webkit-overflow-scrolling:touch"></div>
     </div>`);
     function pintarReporte() {
@@ -2033,7 +2107,7 @@
     $('#rep-seg', b).addEventListener('click', (e) => { const t = e.target.closest('[data-t]'); if (!t) return; repTipo = t.dataset.t; if (repTipo === 'anio') repPer = repPer.slice(0, 4); else if (repPer.length === 4) repPer = repPer + '-' + pad(new Date().getMonth() + 1); [...$('#rep-seg', b).children].forEach((x) => x.classList.toggle('on', x.dataset.t === repTipo)); pintarReporte(); });
     $('#rep-prev', b).addEventListener('click', () => navPer(-1));
     $('#rep-next', b).addEventListener('click', () => navPer(1));
-    $('#rep-pdf', b).addEventListener('click', () => imprimirReporte());
+    $('#rep-pdf', b).addEventListener('click', () => guardarPDF());
     $('#rep-csv', b).addEventListener('click', () => { const d = reporteDatos(repTipo, repPer); bajarArchivo('estado-' + repPer + '.csv', reporteCSV(d), 'text/csv'); });
     pintarReporte();
   }
