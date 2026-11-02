@@ -149,6 +149,12 @@
   .muted { color: var(--label-2); }
   .ic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 15px var(--font); flex: none; background: var(--c, var(--c-gray)); }
   .ic.sq { border-radius: 9px; }
+  .tap { cursor: pointer; }
+  .kv > div.tap dd::after, .legend > div.tap strong::after { content: '›'; margin-left: 6px; color: var(--label-3); font-weight: 400; }
+  .stat.tap .k::after { content: ' ›'; color: var(--label-3); }
+  .kv > div.tap:active, .stat.tap:active, .legend > div.tap:active, .big.tap:active { opacity: .6; }
+  .row .chev { color: var(--label-3); display: grid; place-items: center; margin-left: 2px; }
+  .row .chev svg { width: 14px; height: 14px; }
   .ic.ic-color { background: #eef0f4; }
   .ic.ic-color svg { width: 28px; height: 28px; }
   .sug-i .ic.ic-color svg { width: 22px; height: 22px; }
@@ -1220,6 +1226,7 @@
         if (h > 0.4) g += `<rect x="${x.toFixed(1)}" y="${(T + ph - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" style="fill:var(--c-${c})"/>`;
       });
       g += `<text x="${x0.toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(mesCorto(m.ym))}</text>`;
+      g += `<rect x="${(L + i * pw).toFixed(1)}" y="0" width="${pw.toFixed(1)}" height="${H}" style="fill:transparent; cursor:pointer" data-act="desglose" data-k="mes" data-ym="${m.ym}" role="button" aria-label="${esc(nombreMes(m.ym))}"/>`;
     });
     return `<svg class="bars" viewBox="0 0 ${W} ${H}" role="img" aria-label="Ingresos y gastos de los últimos ${meses.length} meses">${g}</svg>`;
   }
@@ -1308,6 +1315,131 @@
   const ordenMov = (a, b) => (b.fecha.localeCompare(a.fecha) || b.creado.localeCompare(a.creado));
 
   // ================= Vista: Resumen =================
+  // ================= Desglose: de dónde sale cada número del Resumen =================
+  const movsMes = (ym, pred) => S.movimientos.filter((x) => x.fecha.slice(0, 7) === ym && pred(x)).sort(ordenMov);
+  const lineaD = (label, v, opt = {}) => `<${opt.k ? 'button type="button"' : 'div'} class="row ${opt.k ? '' : 'plain'}" ${opt.k ? `data-act="desglose" data-k="${opt.k}"${opt.extra || ''}` : 'style="cursor:default"'}><span class="rt"><span class="t1" style="white-space:normal${opt.bold ? ';font-weight:700' : ''}">${esc(label)}</span>${opt.sub ? `<span class="t2">${esc(opt.sub)}</span>` : ''}</span><span class="amt ${opt.cls || ''}" ${opt.bold ? 'style="font-weight:700"' : ''}>${v}</span>${opt.k ? `<span class="chev">${IC.der}</span>` : ''}</${opt.k ? 'button' : 'div'}>`;
+  const grupoD = (titulo, filas, vacio) => `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">${esc(titulo)}</p>${filas.length ? `<div class="group">${filas.join('')}</div>` : `<div class="group"><div class="row plain" style="cursor:default"><span class="rt"><span class="t2">${esc(vacio || 'Nada por aquí todavía.')}</span></span></div></div>`}</div>`;
+  const filaCtaD = (c, v) => `<button class="row" type="button" data-act="ver-mov-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2">${esc(TIPOS_CUENTA[c.tipo].n)}</span></span><span class="amt ${v < -0.005 ? 'neg' : ''}">${money(v)}</span></button>`;
+  function sheetDesglose(k, data) {
+    const ym = data && data.ym ? data.ym : ymHoy(), d = disponible(ymHoy()), sal = saldos(), pat = patrimonio(sal);
+    const neg = (v) => (v > 0.005 ? '−' + moneyAbs(v) : money(0));
+    let titulo = '', total = '', nota = '', cuerpo = '';
+    if (k === 'libre') {
+      titulo = 'Puedes gastar este mes'; total = money(d.libre);
+      nota = 'Es lo que te queda del ingreso del mes después de apartar el ahorro, lo que ya gastaste y lo que todavía falta pagar. Toca cada línea para ver el detalle.';
+      cuerpo = grupoD('Cómo se calcula', [
+        lineaD(etiquetaIngreso(d.st.ing >= d.ip.v && d.ip.fuente !== 'manual' ? { fuente: 'real' } : d.ip), money(d.ingresoBase), { k: 'ingreso', cls: 'pos' }),
+        lineaD('Ahorro del mes', neg(d.ah), { k: 'ahorro' }),
+        lineaD('Ya gastaste', neg(d.st.gas), { k: 'gastos' }),
+        lineaD('Préstamos por pagar', neg(d.pend), { k: 'prestamos' }),
+        lineaD('Programados por venir', neg(d.prog), { k: 'programados' }),
+        lineaD('Puedes gastar', money(d.libre), { bold: true, cls: d.libre < -0.005 ? 'neg' : 'pos' })
+      ]);
+    } else if (k === 'ingreso' || k === 'recibidos') {
+      const st = statsMes(ymHoy()), ip = ingresoPlan(ymHoy());
+      titulo = k === 'ingreso' ? 'Ingreso del mes' : 'Ingresos de este mes'; total = money(k === 'ingreso' ? d.ingresoBase : st.ing);
+      const ings = movsMes(ymHoy(), (x) => x.tipo === 'ingreso');
+      if (k === 'ingreso') {
+        if (ip.fuente === 'manual') nota = 'Lo escribiste tú en Presupuesto › Ingreso y ahorro. Si este mes recibes más, la app usa lo que de verdad entró.';
+        else if (ip.fuente === 'promedio') {
+          const prev = []; for (let i = 1; i <= 3; i++) { const m = addMes(ymHoy(), -i); if (S.movimientos.some((x) => x.fecha.slice(0, 7) === m)) prev.push({ m, v: statsMes(m).ing }); }
+          nota = st.ing >= ip.v ? 'Este mes ya recibiste más que tu promedio, así que se usa lo que entró.' : `Mientras llegan tus ingresos del mes, la app usa el promedio de tus últimos ${ip.n} ${ip.n === 1 ? 'mes' : 'meses'}.`;
+          cuerpo += grupoD('Promedio de meses anteriores', prev.map((p) => lineaD(nombreMes(p.m), money(p.v), { k: 'mes', extra: ` data-ym="${p.m}"` })).concat([lineaD('Promedio', money(ip.v), { bold: true })]));
+        } else nota = 'Es lo que llevas recibido este mes.';
+      }
+      cuerpo += grupoD(`Recibido en ${nombreMes(ymHoy()).toLowerCase()} · ${money(st.ing)}`, ings.map((x) => filaMov(x)), 'Todavía no registras ingresos este mes.');
+    } else if (k === 'ahorro') {
+      const pa = planAhorro(), am = d.am;
+      titulo = 'Ahorro del mes'; total = money(d.ah);
+      nota = am.neto >= pa.plan - 0.005 && am.neto > 0.005 ? 'Ya ahorraste más que tu plan, así que se aparta lo que de verdad ahorraste.' : 'Se aparta lo que planeas ahorrar. Cuando pasas dinero a una cuenta de ahorro o inversión, cuenta como ahorro.';
+      cuerpo += grupoD('Cómo se calcula', [
+        lineaD(pa.manual ? 'Plan de ahorro (lo escribiste tú)' : 'Plan según tus metas', money(pa.plan), pa.manual ? {} : { k: 'metas' }),
+        lineaD('Llevas ahorrado este mes', money(am.neto), { cls: am.neto > 0.005 ? 'pos' : '' }),
+        lineaD('Se aparta el mayor', money(d.ah), { bold: true })
+      ]);
+      const movs = movsMes(ymHoy(), (x) => { const o = cuenta(x.cuentaId), de = cuenta(x.cuentaDestinoId); return (x.tipo === 'transferencia' && esAhorro(o) !== esAhorro(de)) || (x.tipo === 'ingreso' && esAhorro(o)); });
+      cuerpo += grupoD('Movimientos a tus cuentas de ahorro', movs.map((x) => filaMov(x)), 'Este mes no has pasado dinero a ahorro o inversión.');
+    } else if (k === 'metas') {
+      titulo = 'Plan según tus metas'; total = money(planAhorro().metas);
+      nota = 'Para cada meta con fecha, la app divide lo que te falta entre los meses que quedan.';
+      cuerpo = grupoD('Tus metas', S.metas.map((m) => { const mm = mensualMeta(m); return `<button class="row" type="button" data-act="editar-meta" data-id="${m.id}"><span class="rt"><span class="t1">${esc(m.nombre)}</span><span class="t2">${money(m.ahorrado)} de ${money(m.objetivo)}${m.fecha ? ' · para ' + fCorta(m.fecha) : ' · sin fecha'}</span></span><span class="amt">${mm ? money(mm) + '<small>al mes</small>' : '—'}</span></button>`; }), 'No tienes metas de ahorro.');
+    } else if (k === 'gastos') {
+      const st = statsMes(ymHoy());
+      titulo = 'Gastos de este mes'; total = money(st.gas);
+      nota = 'Todos tus gastos del mes. Las devoluciones se restan. Los pagos a tarjetas no cuentan otra vez, porque ya contaste la compra.';
+      cuerpo = grupoD(`${nombreMes(ymHoy())}`, movsMes(ymHoy(), (x) => x.tipo === 'gasto' || x.tipo === 'devolucion').map((x) => filaMov(x)), 'Todavía no registras gastos este mes.');
+    } else if (k === 'prestamos') {
+      const cuotas = [], pag = movsMes(ymHoy(), (x) => x.tipo !== 'transferencia' && x.categoriaId === CAT_PREST);
+      S.prestamos.forEach((p) => { if (p.enPatrimonio === false) return; const r = amortizar(p).rows.find((r) => !r.fin && isoDe(r.fecha).slice(0, 7) === ymHoy()); if (r) cuotas.push(`<button class="row" type="button" data-act="ir-prest" data-id="${p.id}">${icCat(cat(CAT_PREST))}<span class="rt"><span class="t1">${esc(p.nombre)}</span><span class="t2">Cuota del ${fCorta(isoDe(r.fecha))}</span></span><span class="amt">${money(r.pago)}</span></button>`); });
+      titulo = 'Préstamos por pagar'; total = money(d.pend);
+      nota = 'Son las cuotas de tus préstamos de este mes menos lo que ya registraste en la categoría «Pagos de préstamos».';
+      cuerpo = grupoD(`Cuotas del mes · ${money(d.cuotas)}`, cuotas, 'No hay cuotas este mes.') + grupoD(`Pagos registrados · ${money(suma(pag.map((x) => x.monto)))}`, pag.map((x) => filaMov(x)), 'Todavía no registras pagos de préstamos este mes.');
+    } else if (k === 'programados') {
+      const fin = ymHoy() + '-' + pad(diasDelMes(ymHoy())), filas = [];
+      S.recurrentes.forEach((r) => { if (r.tipo === 'gasto' && r.categoriaId !== CAT_PREST) proximas(r, fin, 40).forEach((f) => filas.push({ f, h: filaRec(r, f, false) })); });
+      titulo = 'Programados por venir'; total = money(d.prog);
+      nota = 'Gastos programados que todavía faltan este mes. Se apartan para que no cuentes ese dinero como libre.';
+      cuerpo = grupoD('Este mes', filas.sort((a, b) => a.f.localeCompare(b.f)).map((x) => x.h), 'No tienes gastos programados pendientes este mes.');
+    } else if (k === 'quedo') {
+      const st = statsMes(ymHoy());
+      titulo = 'Te quedó este mes'; total = money(st.ing - st.gas);
+      cuerpo = grupoD('Cómo se calcula', [lineaD('Ingresos', money(st.ing), { k: 'recibidos', cls: 'pos' }), lineaD('Gastos', neg(st.gas), { k: 'gastos' }), lineaD('Te quedó', money(st.ing - st.gas), { bold: true, cls: st.ing - st.gas < -0.005 ? 'neg' : 'pos' })]);
+    } else if (k === 'patrimonio') {
+      titulo = 'Patrimonio neto'; total = money(pat.neto);
+      nota = 'Todo lo que tienes menos todo lo que debes.';
+      const l = [lineaD('Bancos y efectivo', money(pat.efectivo), { k: 'grupo', extra: ' data-g="efectivo"' })];
+      if (pat.inv) l.push(lineaD('Inversiones', money(pat.inv), { k: 'grupo', extra: ' data-g="inv"' }));
+      if (pat.ret) l.push(lineaD('Retiro', money(pat.ret), { k: 'grupo', extra: ' data-g="ret"' }));
+      l.push(lineaD('Tarjetas de crédito', money(pat.tarj), { k: 'grupo', extra: ' data-g="tarj"', cls: pat.tarj < -0.005 ? 'neg' : '' }));
+      l.push(lineaD('Préstamos', neg(pat.prest), { k: 'grupo', extra: ' data-g="prest"' }));
+      l.push(lineaD('Patrimonio neto', money(pat.neto), { bold: true, cls: pat.neto < -0.005 ? 'neg' : '' }));
+      cuerpo = grupoD('Cómo se calcula', l);
+    } else if (k === 'grupo') {
+      const g = data.g, tipos = { efectivo: ['cheques', 'ahorro', 'efectivo'], inv: ['inversion'], ret: ['retiro'], tarj: ['tarjeta'] }, nombres = { efectivo: 'Bancos y efectivo', inv: 'Inversiones', ret: 'Retiro', tarj: 'Tarjetas de crédito', prest: 'Préstamos' };
+      titulo = nombres[g] || '';
+      if (g === 'prest') {
+        total = money(pat.prest);
+        const ex = S.prestamos.filter((p) => p.enPatrimonio === false);
+        nota = ex.length ? `No cuenta ${ex.length === 1 ? 'el préstamo' : 'los préstamos'} que marcaste fuera de tus finanzas: ${ex.map((p) => p.nombre).join(', ')}.` : '';
+        cuerpo = grupoD('Lo que debes hoy', S.prestamos.filter((p) => p.enPatrimonio !== false).map((p) => { const a = amortizar(p); return `<button class="row" type="button" data-act="ir-prest" data-id="${p.id}">${icCat(cat(CAT_PREST))}<span class="rt"><span class="t1">${esc(p.nombre)}</span><span class="t2">${esc(TIPOS_PREST[p.tipo])} · ${pct(p.monto > 0 ? (p.monto - a.saldoHoy) / p.monto * 100 : 0)} pagado</span></span><span class="amt">${money(a.saldoHoy)}</span></button>`; }), 'No tienes préstamos.');
+      } else {
+        const cs = S.cuentas.filter((c) => tipos[g].includes(c.tipo));
+        total = money(suma(cs.map((c) => sal[c.id] || 0)));
+        cuerpo = grupoD('Cuentas', cs.map((c) => filaCtaD(c, sal[c.id] || 0)), 'No tienes cuentas de este tipo.');
+      }
+    } else if (k === 'cat') {
+      const st = statsMes(ymHoy()), id = data.id;
+      if (id === '_otras') {
+        const top = Object.entries(st.porCat).map(([kk, v]) => ({ c: cat(kk), k: kk, v })).filter((x) => (x.c ? x.c.tipo === 'gasto' : x.k === '_g') && x.v > 0).sort((a, b) => b.v - a.v).slice(5);
+        titulo = 'Otras categorías'; total = money(suma(top.map((x) => x.v)));
+        cuerpo = grupoD(nombreMes(ymHoy()), top.map((x) => `<button class="row" type="button" data-act="desglose" data-k="cat" data-id="${x.k}">${icCat(x.c)}<span class="rt"><span class="t1">${esc(x.c ? x.c.nombre : 'Sin categoría')}</span></span><span class="amt">${money(x.v)}</span><span class="chev">${IC.der}</span></button>`));
+      } else {
+        const c = cat(id);
+        titulo = c ? c.nombre : 'Sin categoría'; total = money(st.porCat[id] || 0);
+        cuerpo = grupoD(nombreMes(ymHoy()), movsMes(ymHoy(), (x) => x.tipo !== 'transferencia' && x.tipo !== 'ingreso' && (id === '_g' ? !x.categoriaId : x.categoriaId === id)).map((x) => filaMov(x)));
+      }
+    } else if (k === 'mes') {
+      const st = statsMes(ym);
+      titulo = nombreMes(ym); total = money(st.ing - st.gas);
+      nota = 'Lo que te quedó ese mes: ingresos menos gastos.';
+      cuerpo = grupoD('Resumen', [lineaD('Ingresos', money(st.ing), { cls: 'pos' }), lineaD('Gastos', neg(st.gas)), lineaD('Te quedó', money(st.ing - st.gas), { bold: true, cls: st.ing - st.gas < -0.005 ? 'neg' : 'pos' })])
+        + grupoD('Ingresos', movsMes(ym, (x) => x.tipo === 'ingreso').map((x) => filaMov(x)), 'Sin ingresos ese mes.')
+        + grupoD('Gastos', movsMes(ym, (x) => x.tipo === 'gasto' || x.tipo === 'devolucion').map((x) => filaMov(x)), 'Sin gastos ese mes.');
+    } else if (k === 'proy') {
+      const pr = proyeccion(6); if (!pr) return;
+      const liq = S.cuentas.filter((c) => c.tipo === 'cheques' || c.tipo === 'ahorro' || c.tipo === 'efectivo'), ids = new Set(liq.map((c) => c.id)), hoy = hoyISO();
+      titulo = 'Pronóstico · 6 meses'; total = money(pr.pts[pr.pts.length - 1].v);
+      nota = 'Parte de lo que tienes hoy en bancos y efectivo, y le suma o resta tus movimientos programados y los que ya tienen fecha futura.';
+      cuerpo = grupoD('Hoy', liq.map((c) => filaCtaD(c, saldoAl(c, hoy))));
+      pr.pts.forEach((p) => {
+        const fin = p.ym + '-' + pad(diasDelMes(p.ym)), items = [];
+        S.movimientos.forEach((x) => { if (x.fecha > hoy && x.fecha.slice(0, 7) === p.ym && efectoLiq(x, ids)) items.push({ f: x.fecha, h: filaMov(x) }); });
+        S.recurrentes.forEach((r) => { if (!efectoLiq(r, ids)) return; proximas(r, fin, 60).forEach((f) => { if (f > hoy && f.slice(0, 7) === p.ym) items.push({ f, h: filaRec(r, f, false) }); }); });
+        cuerpo += grupoD(`${nombreMes(p.ym)} · ${p.flujo >= 0 ? '+' : '−'}${moneyAbs(p.flujo)} → ${money(p.v)}`, items.sort((a, b) => a.f.localeCompare(b.f)).map((x) => x.h), 'Sin movimientos programados.');
+      });
+    } else return;
+    abrirSheet(`${cabeza(titulo, false)}<div style="display:grid; gap:18px"><div class="card" style="background:var(--sheet-card)"><p class="muted" style="font-size:14px; margin:0">${esc(titulo)}</p><p style="font:700 30px/1.2 var(--font-r); margin:2px 0 0">${total}</p>${nota ? `<p class="note" style="margin:8px 0 0">${esc(nota)}</p>` : ''}</div>${cuerpo}</div>`);
+  }
   function vInicio() {
     const ym = ymHoy(), d = disponible(ym), sal = saldos(), pat = patrimonio(sal);
     const hoy = new Date(), diasRest = diasDelMes(ym) - hoy.getDate() + 1;
@@ -1332,8 +1464,8 @@
       const ratio = d.sobre > 0 ? Math.min(1, d.usado / d.sobre) : 1;
       const color = d.libre < 0 ? 'red' : ratio > 0.85 ? 'orange' : 'green';
       const sub = d.libre > 0.005 ? `Unos ${money(d.libre / diasRest)} por día · quedan ${diasRest} ${diasRest === 1 ? 'día' : 'días'} del mes` : d.libre < -0.005 ? 'Ya gastaste más de lo que planeaste este mes' : 'Ya usaste todo lo disponible de este mes';
-      html += `<section class="hero"><p class="k">Puedes gastar este mes</p><p class="big ${d.libre < -0.005 ? 'neg' : ''}">${money(d.libre)}</p><p class="sub">${sub}</p><div class="bar lg" style="--c:var(--c-${color})"><i style="width:${(ratio * 100).toFixed(1)}%"></i></div>
-        <dl class="kv"><div><dt>${etiquetaIngreso(d.st.ing >= d.ip.v && d.ip.fuente !== 'manual' ? { fuente: 'real' } : d.ip)}</dt><dd>${money(d.ingresoBase)}</dd></div><div><dt>${d.am.neto > 0.005 ? (d.am.neto >= d.ahPlan - 0.005 ? 'Ahorrado este mes' : `Para ahorro · llevas ${money(d.am.neto)}`) : 'Separado para ahorro'}</dt><dd>${menos(d.ah)}</dd></div><div><dt>Ya gastaste</dt><dd>${menos(d.st.gas)}</dd></div>${d.pend > 0.005 ? `<div><dt>Préstamos por pagar</dt><dd>${menos(d.pend)}</dd></div>` : ''}${d.prog > 0.005 ? `<div><dt>Programados por venir</dt><dd>${menos(d.prog)}</dd></div>` : ''}</dl></section>`;
+      html += `<section class="hero"><p class="k">Puedes gastar este mes</p><p class="big tap ${d.libre < -0.005 ? 'neg' : ''}" data-act="desglose" data-k="libre">${money(d.libre)}</p><p class="sub">${sub}</p><div class="bar lg" style="--c:var(--c-${color})"><i style="width:${(ratio * 100).toFixed(1)}%"></i></div>
+        <dl class="kv"><div class="tap" data-act="desglose" data-k="ingreso"><dt>${etiquetaIngreso(d.st.ing >= d.ip.v && d.ip.fuente !== 'manual' ? { fuente: 'real' } : d.ip)}</dt><dd>${money(d.ingresoBase)}</dd></div><div class="tap" data-act="desglose" data-k="ahorro"><dt>${d.am.neto > 0.005 ? (d.am.neto >= d.ahPlan - 0.005 ? 'Ahorrado este mes' : `Para ahorro · llevas ${money(d.am.neto)}`) : 'Separado para ahorro'}</dt><dd>${menos(d.ah)}</dd></div><div class="tap" data-act="desglose" data-k="gastos"><dt>Ya gastaste</dt><dd>${menos(d.st.gas)}</dd></div>${d.pend > 0.005 ? `<div class="tap" data-act="desglose" data-k="prestamos"><dt>Préstamos por pagar</dt><dd>${menos(d.pend)}</dd></div>` : ''}${d.prog > 0.005 ? `<div class="tap" data-act="desglose" data-k="programados"><dt>Programados por venir</dt><dd>${menos(d.prog)}</dd></div>` : ''}</dl></section>`;
     }
 
     const tjs = S.cuentas.map((c) => ({ c, e: estadoTarjeta(c) })).filter((x) => x.e).sort((a, b) => a.e.venc.localeCompare(b.e.venc));
@@ -1348,26 +1480,26 @@
     if (ag.length) html += `<section class="section"><div class="sh"><h2>Próximos 30 días</h2><button class="link sm" type="button" data-act="programados">Programados</button></div><div class="group">${ag.slice(0, 5).map(({ r, f }) => filaRec(r, f, false)).join('')}</div></section>`;
     const ahorroMes = d.st.ing - d.st.gas;
     html += `<section class="section"><div class="sh"><h2>Este mes</h2><button class="link sm" type="button" data-act="tab" data-v="movimientos">Ver todo</button></div><div class="stats">
-      <div class="stat"><p class="k">Ingresos</p><p class="v pos">${money(d.st.ing)}</p></div>
-      <div class="stat"><p class="k">Gastos</p><p class="v">${money(d.st.gas)}</p></div>
-      <div class="stat"><p class="k">Te quedó</p><p class="v ${ahorroMes < -0.005 ? 'neg' : ''}">${money(ahorroMes)}</p><p class="s">${d.st.ing > 0 ? pct(ahorroMes / d.st.ing * 100) + ' de tus ingresos' : '—'}</p></div>
+      <div class="stat tap" data-act="desglose" data-k="recibidos"><p class="k">Ingresos</p><p class="v pos">${money(d.st.ing)}</p></div>
+      <div class="stat tap" data-act="desglose" data-k="gastos"><p class="k">Gastos</p><p class="v">${money(d.st.gas)}</p></div>
+      <div class="stat tap" data-act="desglose" data-k="quedo"><p class="k">Te quedó</p><p class="v ${ahorroMes < -0.005 ? 'neg' : ''}">${money(ahorroMes)}</p><p class="s">${d.st.ing > 0 ? pct(ahorroMes / d.st.ing * 100) + ' de tus ingresos' : '—'}</p></div>
     </div></section>`;
 
-    html += `<section class="section"><div class="sh"><h2>Lo que tienes</h2><button class="link sm" type="button" data-act="tab" data-v="cuentas">Cuentas</button></div><div class="card"><p class="muted" style="font-size:15px">Patrimonio neto</p><p class="big ${pat.neto < -0.005 ? 'neg' : ''}" style="font:700 34px/1.15 var(--font-r)">${money(pat.neto)}</p>
-      <dl class="kv"><div><dt>Bancos y efectivo</dt><dd>${money(pat.efectivo)}</dd></div>${pat.inv ? `<div><dt>Inversiones</dt><dd>${money(pat.inv)}</dd></div>` : ''}${pat.ret ? `<div><dt>Retiro</dt><dd>${money(pat.ret)}</dd></div>` : ''}<div><dt>Tarjetas de crédito</dt><dd class="${pat.tarj < -0.005 ? 'neg' : ''}">${money(pat.tarj)}</dd></div><div><dt>Préstamos</dt><dd class="${pat.prest > 0.005 ? 'neg' : ''}">${pat.prest > 0.005 ? '−' : ''}${moneyAbs(pat.prest)}</dd></div></dl></div></section>`;
+    html += `<section class="section"><div class="sh"><h2>Lo que tienes</h2><button class="link sm" type="button" data-act="tab" data-v="cuentas">Cuentas</button></div><div class="card"><p class="muted" style="font-size:15px">Patrimonio neto</p><p class="big tap ${pat.neto < -0.005 ? 'neg' : ''}" data-act="desglose" data-k="patrimonio" style="font:700 34px/1.15 var(--font-r)">${money(pat.neto)}</p>
+      <dl class="kv"><div class="tap" data-act="desglose" data-k="grupo" data-g="efectivo"><dt>Bancos y efectivo</dt><dd>${money(pat.efectivo)}</dd></div>${pat.inv ? `<div class="tap" data-act="desglose" data-k="grupo" data-g="inv"><dt>Inversiones</dt><dd>${money(pat.inv)}</dd></div>` : ''}${pat.ret ? `<div class="tap" data-act="desglose" data-k="grupo" data-g="ret"><dt>Retiro</dt><dd>${money(pat.ret)}</dd></div>` : ''}<div class="tap" data-act="desglose" data-k="grupo" data-g="tarj"><dt>Tarjetas de crédito</dt><dd class="${pat.tarj < -0.005 ? 'neg' : ''}">${money(pat.tarj)}</dd></div><div class="tap" data-act="desglose" data-k="grupo" data-g="prest"><dt>Préstamos</dt><dd class="${pat.prest > 0.005 ? 'neg' : ''}">${pat.prest > 0.005 ? '−' : ''}${moneyAbs(pat.prest)}</dd></div></dl></div></section>`;
     const serie = seriePatrimonio();
-    if (serie.length >= 2) { const dif = serie[serie.length - 1].v - serie[0].v, ult = serie[serie.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Patrimonio en el tiempo</h3><span class="${dif >= 0 ? 'pos' : 'neg'}" style="font-size:15px; font-weight:600">${dif >= 0 ? '+' : '−'}${moneyAbs(dif)}</span></div><p class="muted chart-sel" style="font-size:14px; margin:0 0 8px"><b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}</p>${barrasPatrimonio(serie)}</section>`; }
+    if (serie.length >= 2) { const dif = serie[serie.length - 1].v - serie[0].v, ult = serie[serie.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Patrimonio en el tiempo</h3><span class="${dif >= 0 ? 'pos' : 'neg'}" style="font-size:15px; font-weight:600">${dif >= 0 ? '+' : '−'}${moneyAbs(dif)}</span></div><button class="link sm" type="button" data-act="desglose" data-k="patrimonio" style="padding:0; margin:0 0 4px">Ver de qué se forma</button><p class="muted chart-sel" style="font-size:14px; margin:0 0 8px"><b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}</p>${barrasPatrimonio(serie)}</section>`; }
     const proy = proyeccion(6);
-    if (proy && proy.hayFlujo) { const neg = proy.min.v < -0.005, ult = proy.pts[proy.pts.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Pronóstico · 6 meses</h3></div><p class="${neg ? 'neg' : 'muted'} chart-sel" style="font-size:14px; margin:0 0 8px">${neg ? `Tu saldo baja a <b>${money(proy.min.v)}</b> en ${esc(mesCorto(proy.min.ym))} ${proy.min.ym.slice(0, 4)}` : `<b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}`}</p>${barrasPatrimonio(proy.pts)}<p class="note" style="margin:8px 0 0">Estimado del dinero en bancos y efectivo con tus movimientos programados. Toca una barra para ver cada mes.</p></section>`; }
+    if (proy && proy.hayFlujo) { const neg = proy.min.v < -0.005, ult = proy.pts[proy.pts.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Pronóstico · 6 meses</h3><button class="link sm" type="button" data-act="desglose" data-k="proy">Ver detalle</button></div><p class="${neg ? 'neg' : 'muted'} chart-sel" style="font-size:14px; margin:0 0 8px">${neg ? `Tu saldo baja a <b>${money(proy.min.v)}</b> en ${esc(mesCorto(proy.min.ym))} ${proy.min.ym.slice(0, 4)}` : `<b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}`}</p>${barrasPatrimonio(proy.pts)}<p class="note" style="margin:8px 0 0">Estimado del dinero en bancos y efectivo con tus movimientos programados. Toca una barra para ver cada mes o «Ver detalle» para ver qué lo mueve.</p></section>`; }
 
     const gastosCat = Object.entries(d.st.porCat).map(([k, v]) => ({ c: cat(k), k, v })).filter((x) => (x.c ? x.c.tipo === 'gasto' : x.k === '_g') && x.v > 0).sort((a, b) => b.v - a.v);
-    const top = gastosCat.slice(0, 5).map((x) => ({ v: x.v, color: x.c ? x.c.color : 'gray', n: x.c ? x.c.nombre : 'Sin categoría' }));
+    const top = gastosCat.slice(0, 5).map((x) => ({ v: x.v, color: x.c ? x.c.color : 'gray', n: x.c ? x.c.nombre : 'Sin categoría', k: x.k }));
     const resto = suma(gastosCat.slice(5).map((x) => x.v));
-    if (resto > 0) top.push({ v: resto, color: 'gray', n: 'Otras' });
+    if (resto > 0) top.push({ v: resto, color: 'gray', n: 'Otras', k: '_otras' });
     const meses = []; for (let i = 5; i >= 0; i--) { const m = addMes(ym, -i); const s = statsMes(m); meses.push({ ym: m, ing: s.ing, gas: s.gas }); }
     html += `<div class="grid2">
-      <section class="card"><h3 style="margin-bottom:12px">Gastos por categoría</h3>${d.st.gas > 0 ? `<div class="chart-row">${donut(top, d.st.gas)}<div class="legend">${top.map((t) => `<div style="--c:var(--c-${t.color})"><b></b><span>${esc(t.n)}</span><strong>${money(t.v)}</strong></div>`).join('')}</div></div>` : '<p class="muted">Cuando registres gastos de este mes, aquí verás en qué se va tu dinero.</p>'}</section>
-      <section class="card"><h3 style="margin-bottom:8px">Últimos 6 meses</h3>${barras(meses)}<div class="chart-key"><span style="--c:var(--c-green)"><b></b>Ingresos</span><span style="--c:var(--c-red)"><b></b>Gastos</span></div></section>
+      <section class="card"><h3 style="margin-bottom:12px">Gastos por categoría</h3>${d.st.gas > 0 ? `<div class="chart-row">${donut(top, d.st.gas)}<div class="legend">${top.map((t) => `<div class="tap" data-act="desglose" data-k="cat" data-id="${t.k}" style="--c:var(--c-${t.color})"><b></b><span>${esc(t.n)}</span><strong>${money(t.v)}</strong></div>`).join('')}</div></div>` : '<p class="muted">Cuando registres gastos de este mes, aquí verás en qué se va tu dinero.</p>'}</section>
+      <section class="card"><h3 style="margin-bottom:8px">Últimos 6 meses</h3><p class="muted" style="font-size:13px; margin:-4px 0 6px">Toca un mes para ver su detalle.</p>${barras(meses)}<div class="chart-key"><span style="--c:var(--c-green)"><b></b>Ingresos</span><span style="--c:var(--c-red)"><b></b>Gastos</span></div></section>
     </div>`;
 
     const rec = S.movimientos.slice().sort(ordenMov).slice(0, 6);
@@ -2572,7 +2704,9 @@
     'mes-mov': (t) => { mesMov = addMes(mesMov, +t.dataset.d); render(); },
     'mes-pres': (t) => { mesPres = addMes(mesPres, +t.dataset.d); render(); },
     'limpiar-filtros': () => { filtro.cuenta = ''; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; render(); },
-    'ver-mov-cuenta': (t) => { filtro.cuenta = t.dataset.id; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; ir('movimientos'); window.scrollTo(0, 0); },
+    'desglose': (t) => sheetDesglose(t.dataset.k, { ym: t.dataset.ym, g: t.dataset.g, id: t.dataset.id }),
+    'ir-prest': (t) => { cerrarSheet(); ir('prestamos'); prestAbierto = t.dataset.id; render(); window.scrollTo(0, 0); },
+    'ver-mov-cuenta': (t) => { cerrarSheet(); filtro.cuenta = t.dataset.id; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; ir('movimientos'); window.scrollTo(0, 0); },
     'programados': () => sheetProgramados(), 'nuevo-rec': () => sheetRec(null), 'editar-rec': (t) => sheetRec(t.dataset.id),
     'rec-confirmar': (t) => { const r = S.recurrentes.find((x) => x.id === t.dataset.id); if (!r) return; S.movimientos.push(movDeRec(r, t.dataset.f)); r.hasta = t.dataset.f; guardar(); render(); toast('Movimiento registrado'); },
     'rec-saltar': (t) => { const r = S.recurrentes.find((x) => x.id === t.dataset.id); if (!r) return; r.hasta = t.dataset.f; guardar(); render(); toast('Se saltó esta vez'); },
