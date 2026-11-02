@@ -854,7 +854,7 @@
   }
   function cuotasMes(ym) {
     let t = 0;
-    S.prestamos.forEach((p) => { const r = amortizar(p).rows.find((r) => !r.fin && isoDe(r.fecha).slice(0, 7) === ym); if (r) t += r.pago; });
+    S.prestamos.forEach((p) => { if (p.enPatrimonio === false) return; const r = amortizar(p).rows.find((r) => !r.fin && isoDe(r.fecha).slice(0, 7) === ym); if (r) t += r.pago; });
     return t;
   }
   function mesesHasta(iso) { const h = new Date(), d = parseISO(iso); return (d.getFullYear() - h.getFullYear()) * 12 + (d.getMonth() - h.getMonth()) + 1; }
@@ -1342,7 +1342,7 @@
     if (!S.prestamos.length) return html + `<div class="empty"><strong>Aún no tienes préstamos</strong>Registra tu hipoteca, tu auto o cualquier crédito, y simula abonos extra para pagarlo antes.<button class="btn small" type="button" data-act="nuevo-prest">Agregar préstamo</button></div>`;
     const calc = S.prestamos.map((p) => ({ p, a: amortizar(p) }));
     html += `<div class="stats"><div class="stat"><p class="k">Debes hoy</p><p class="v">${money(suma(calc.map((x) => x.a.saldoHoy)))}</p></div><div class="stat"><p class="k">Pagos al mes</p><p class="v">${money(suma(calc.filter((x) => x.a.saldoHoy > 0).map((x) => x.a.cuota)))}</p></div><div class="stat"><p class="k">Abonos extra</p><p class="v">${money(suma(calc.map((x) => x.a.totEx)))}</p></div><div class="stat"><p class="k">Intereses ahorrados</p><p class="v pos">${money(suma(calc.map((x) => x.a.ahorro)))}</p></div></div>`;
-    html += `<div class="loans">${calc.map(({ p, a }) => { const av = p.monto > 0 ? (p.monto - a.saldoHoy) / p.monto * 100 : 0; return `<article class="loan"><span class="chip">${TIPOS_PREST[p.tipo]}</span>${p.enPatrimonio === false ? '<span class="chip" style="background:var(--fill); color:var(--muted)">Fuera del patrimonio</span>' : ''}<h3>${esc(p.nombre)}</h3><div><p class="muted" style="font-size:13px">Saldo hoy</p><p class="big">${money(a.saldoHoy)}</p></div><div><div class="bar"><i style="width:${Math.min(100, av).toFixed(1)}%"></i></div><p class="muted" style="font-size:13px;margin-top:6px">${pct(av)} pagado · termina en ${a.ultima ? fMes(a.ultima) : '—'}</p></div><dl class="facts"><div><dt>Cuota mensual</dt><dd>${money(a.cuota)}</dd></div><div><dt>Monto original</dt><dd>${money(p.monto)}</dd></div><div><dt>Tasa anual</dt><dd>${p.tasa}%</dd></div><div><dt>Plazo</dt><dd>${tiempo(Math.round(p.plazo * 12))}</dd></div></dl><div class="loan-actions"><button class="btn small tinted" type="button" data-act="abrir-prest" data-id="${p.id}">Ver tabla y abonos</button><button class="link sm" type="button" data-act="editar-prest" data-id="${p.id}">Editar</button></div></article>`; }).join('')}</div>`;
+    html += `<div class="loans">${calc.map(({ p, a }) => { const av = p.monto > 0 ? (p.monto - a.saldoHoy) / p.monto * 100 : 0; return `<article class="loan"><span class="chip">${TIPOS_PREST[p.tipo]}</span>${p.enPatrimonio === false ? '<span class="chip" style="background:var(--fill); color:var(--muted)">Fuera de mis finanzas</span>' : ''}<h3>${esc(p.nombre)}</h3><div><p class="muted" style="font-size:13px">Saldo hoy</p><p class="big">${money(a.saldoHoy)}</p></div><div><div class="bar"><i style="width:${Math.min(100, av).toFixed(1)}%"></i></div><p class="muted" style="font-size:13px;margin-top:6px">${pct(av)} pagado · termina en ${a.ultima ? fMes(a.ultima) : '—'}</p></div><dl class="facts"><div><dt>Cuota mensual</dt><dd>${money(a.cuota)}</dd></div><div><dt>Monto original</dt><dd>${money(p.monto)}</dd></div><div><dt>Tasa anual</dt><dd>${p.tasa}%</dd></div><div><dt>Plazo</dt><dd>${tiempo(Math.round(p.plazo * 12))}</dd></div></dl><div class="loan-actions"><button class="btn small tinted" type="button" data-act="abrir-prest" data-id="${p.id}">Ver tabla y abonos</button><button class="link sm" type="button" data-act="editar-prest" data-id="${p.id}">Editar</button></div></article>`; }).join('')}</div>`;
     return html;
   }
   function vPrestDetalle() {
@@ -2015,8 +2015,8 @@
         <div class="frow"><label for="p-metodo">Cálculo del interés</label><select id="p-metodo"><option value="efectiva">Interés efectivo mensual</option><option value="nominal">Tasa ÷ 12 (bancos)</option></select></div>
       </div>
       <p class="note">Si la cuota no coincide con tu estado de cuenta, cambia el cálculo del interés. Los préstamos de auto casi siempre usan «Tasa ÷ 12».</p>
-      <div class="group"><div class="frow"><label for="p-pat" class="lbl-w">Contar en mi patrimonio</label><input id="p-pat" class="switch" type="checkbox" ${!p || p.enPatrimonio !== false ? 'checked' : ''}></div></div>
-      <p class="note">Si lo apagas, este préstamo no suma ni resta en tu patrimonio neto (útil si lo pagas desde una cuenta que no llevas aquí). Seguirá apareciendo en Préstamos con su tabla y sus abonos.</p>
+      <div class="group"><div class="frow"><label for="p-pat" class="lbl-w">Contar en mis finanzas</label><input id="p-pat" class="switch" type="checkbox" ${!p || p.enPatrimonio !== false ? 'checked' : ''}></div></div>
+      <p class="note">Si lo apagas, este préstamo no entra en tu patrimonio ni en tu presupuesto (útil si lo pagas desde una cuenta que no llevas aquí). Seguirá apareciendo en Préstamos con su tabla y sus abonos.</p>
       <p class="form-error" id="p-error" role="alert"></p>
       ${p ? '<button class="btn block destructive" type="button" id="p-borrar">Eliminar préstamo</button>' : ''}
     </div></form>`);
