@@ -493,7 +493,7 @@
       monto: Math.max(0, num(p.monto)), tasa: Math.max(0, num(p.tasa)), plazo: Math.max(0.5, num(p.plazo) || 1),
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(p.fecha || '') ? p.fecha : hoyISO(),
       metodo: p.metodo === 'nominal' || p.metodo === 'efectiva' ? p.metodo : metodoPorTipo(p.tipo),
-      extras, creado: p.creado || new Date().toISOString()
+      extras, enPatrimonio: p.enPatrimonio !== false, creado: p.creado || new Date().toISOString()
     };
   }
   function desdeFormatoViejo(lista, extrasViejos) {
@@ -1001,7 +1001,7 @@
   function patrimonio(sal) {
     let efectivo = 0, inv = 0, ret = 0, tarj = 0;
     S.cuentas.forEach((c) => { const v = sal[c.id] || 0; if (c.tipo === 'tarjeta') tarj += v; else if (c.tipo === 'inversion') inv += v; else if (c.tipo === 'retiro') ret += v; else efectivo += v; });
-    const prest = suma(S.prestamos.map((p) => amortizar(p).saldoHoy));
+    const prest = suma(S.prestamos.filter((p) => p.enPatrimonio !== false).map((p) => amortizar(p).saldoHoy));
     return { efectivo, inv, ret, tarj, prest, neto: efectivo + inv + ret + tarj - prest };
   }
 
@@ -1342,7 +1342,7 @@
     if (!S.prestamos.length) return html + `<div class="empty"><strong>Aún no tienes préstamos</strong>Registra tu hipoteca, tu auto o cualquier crédito, y simula abonos extra para pagarlo antes.<button class="btn small" type="button" data-act="nuevo-prest">Agregar préstamo</button></div>`;
     const calc = S.prestamos.map((p) => ({ p, a: amortizar(p) }));
     html += `<div class="stats"><div class="stat"><p class="k">Debes hoy</p><p class="v">${money(suma(calc.map((x) => x.a.saldoHoy)))}</p></div><div class="stat"><p class="k">Pagos al mes</p><p class="v">${money(suma(calc.filter((x) => x.a.saldoHoy > 0).map((x) => x.a.cuota)))}</p></div><div class="stat"><p class="k">Abonos extra</p><p class="v">${money(suma(calc.map((x) => x.a.totEx)))}</p></div><div class="stat"><p class="k">Intereses ahorrados</p><p class="v pos">${money(suma(calc.map((x) => x.a.ahorro)))}</p></div></div>`;
-    html += `<div class="loans">${calc.map(({ p, a }) => { const av = p.monto > 0 ? (p.monto - a.saldoHoy) / p.monto * 100 : 0; return `<article class="loan"><span class="chip">${TIPOS_PREST[p.tipo]}</span><h3>${esc(p.nombre)}</h3><div><p class="muted" style="font-size:13px">Saldo hoy</p><p class="big">${money(a.saldoHoy)}</p></div><div><div class="bar"><i style="width:${Math.min(100, av).toFixed(1)}%"></i></div><p class="muted" style="font-size:13px;margin-top:6px">${pct(av)} pagado · termina en ${a.ultima ? fMes(a.ultima) : '—'}</p></div><dl class="facts"><div><dt>Cuota mensual</dt><dd>${money(a.cuota)}</dd></div><div><dt>Monto original</dt><dd>${money(p.monto)}</dd></div><div><dt>Tasa anual</dt><dd>${p.tasa}%</dd></div><div><dt>Plazo</dt><dd>${tiempo(Math.round(p.plazo * 12))}</dd></div></dl><div class="loan-actions"><button class="btn small tinted" type="button" data-act="abrir-prest" data-id="${p.id}">Ver tabla y abonos</button><button class="link sm" type="button" data-act="editar-prest" data-id="${p.id}">Editar</button></div></article>`; }).join('')}</div>`;
+    html += `<div class="loans">${calc.map(({ p, a }) => { const av = p.monto > 0 ? (p.monto - a.saldoHoy) / p.monto * 100 : 0; return `<article class="loan"><span class="chip">${TIPOS_PREST[p.tipo]}</span>${p.enPatrimonio === false ? '<span class="chip" style="background:var(--fill); color:var(--muted)">Fuera del patrimonio</span>' : ''}<h3>${esc(p.nombre)}</h3><div><p class="muted" style="font-size:13px">Saldo hoy</p><p class="big">${money(a.saldoHoy)}</p></div><div><div class="bar"><i style="width:${Math.min(100, av).toFixed(1)}%"></i></div><p class="muted" style="font-size:13px;margin-top:6px">${pct(av)} pagado · termina en ${a.ultima ? fMes(a.ultima) : '—'}</p></div><dl class="facts"><div><dt>Cuota mensual</dt><dd>${money(a.cuota)}</dd></div><div><dt>Monto original</dt><dd>${money(p.monto)}</dd></div><div><dt>Tasa anual</dt><dd>${p.tasa}%</dd></div><div><dt>Plazo</dt><dd>${tiempo(Math.round(p.plazo * 12))}</dd></div></dl><div class="loan-actions"><button class="btn small tinted" type="button" data-act="abrir-prest" data-id="${p.id}">Ver tabla y abonos</button><button class="link sm" type="button" data-act="editar-prest" data-id="${p.id}">Editar</button></div></article>`; }).join('')}</div>`;
     return html;
   }
   function vPrestDetalle() {
@@ -2015,6 +2015,8 @@
         <div class="frow"><label for="p-metodo">Cálculo del interés</label><select id="p-metodo"><option value="efectiva">Interés efectivo mensual</option><option value="nominal">Tasa ÷ 12 (bancos)</option></select></div>
       </div>
       <p class="note">Si la cuota no coincide con tu estado de cuenta, cambia el cálculo del interés. Los préstamos de auto casi siempre usan «Tasa ÷ 12».</p>
+      <div class="group"><div class="frow"><label for="p-pat" class="lbl-w">Contar en mi patrimonio</label><input id="p-pat" class="switch" type="checkbox" ${!p || p.enPatrimonio !== false ? 'checked' : ''}></div></div>
+      <p class="note">Si lo apagas, este préstamo no suma ni resta en tu patrimonio neto (útil si lo pagas desde una cuenta que no llevas aquí). Seguirá apareciendo en Préstamos con su tabla y sus abonos.</p>
       <p class="form-error" id="p-error" role="alert"></p>
       ${p ? '<button class="btn block destructive" type="button" id="p-borrar">Eliminar préstamo</button>' : ''}
     </div></form>`);
@@ -2032,7 +2034,7 @@
       else if (!(plazo >= 0.5)) err = 'El plazo debe ser de al menos medio año.';
       else if (!fecha) err = 'Elige la fecha del primer pago.';
       if (err) { $('#p-error', b).textContent = err; return; }
-      const nuevo = normalizarPrestamo({ ...(p || {}), id: p ? p.id : undefined, nombre, tipo: $('#p-tipo', b).value, monto, tasa, plazo, fecha, metodo: $('#p-metodo', b).value, extras: p ? p.extras : {} });
+      const nuevo = normalizarPrestamo({ ...(p || {}), id: p ? p.id : undefined, nombre, tipo: $('#p-tipo', b).value, monto, tasa, plazo, fecha, metodo: $('#p-metodo', b).value, enPatrimonio: $('#p-pat', b).checked, extras: p ? p.extras : {} });
       if (p) S.prestamos[S.prestamos.indexOf(p)] = nuevo; else S.prestamos.push(nuevo);
       guardar(); cerrarSheet(); toast(p ? 'Préstamo actualizado' : 'Préstamo agregado'); render();
     });
