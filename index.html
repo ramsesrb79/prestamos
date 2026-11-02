@@ -193,6 +193,8 @@
   .donut .dk { fill: var(--label-2); font: 500 9px var(--font); }
   .donut .dv { fill: var(--label); font: 700 15px var(--font-r); }
   .bars { width: 100%; height: auto; display: block; }
+  .pat-hit:focus { outline: none; }
+  .pat-hit:focus-visible { outline: 2px solid var(--tint); outline-offset: -1px; }
   .bars text { fill: var(--label-2); font: 500 10px var(--font); }
   .bars line { stroke: var(--sep); stroke-width: .6; }
   .chart-key { display: flex; gap: 16px; font-size: 13px; color: var(--label-2); margin-top: 6px; }
@@ -1054,24 +1056,29 @@
     while (ym <= cur && meses.length < 60) { meses.push(ym); ym = addMes(ym, 1); }
     return (meses.length > 24 ? meses.slice(-24) : meses).map((m) => ({ ym: m, v: patrimonioEn(m === cur ? hoy : m + '-' + pad(diasDelMes(m))) }));
   }
-  function lineaPatrimonio(pts) {
+  function barrasPatrimonio(pts) {
     const W = 340, H = 176, L = 42, R = 8, T = 12, B = 26, ph = H - T - B, pw = W - L - R;
     const vals = pts.map((p) => p.v); let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
-    if (hi - lo < 1) hi = lo + 1; const padv = (hi - lo) * 0.12; lo -= padv; hi += padv;
-    const x = (i) => L + (pts.length === 1 ? pw / 2 : (i / (pts.length - 1)) * pw);
-    const y = (v) => T + ph - ((v - lo) / (hi - lo)) * ph;
+    if (hi - lo < 1) hi = lo + 1; const padv = (hi - lo) * 0.08; hi += padv; if (lo < 0) lo -= padv;
+    const y = (v) => T + ph - ((v - lo) / (hi - lo)) * ph, y0 = y(0);
+    const colW = pw / pts.length, bw = Math.min(26, colW * 0.62);
     let g = '';
     [lo, (lo + hi) / 2, hi].forEach((mv) => { const yy = y(mv).toFixed(1); g += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}"/><text x="${L - 6}" y="${(+yy + 3.5).toFixed(1)}" text-anchor="end">${compact(mv)}</text>`; });
-    if (lo < 0 && hi > 0) { const yz = y(0).toFixed(1); g += `<line x1="${L}" x2="${W - R}" y1="${yz}" y2="${yz}" style="stroke:var(--label-3); stroke-width:.9"/>`; }
-    const col = vals[vals.length - 1] >= 0 ? 'green' : 'red';
-    const pl = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
-    const area = `M ${x(0).toFixed(1)} ${y(lo).toFixed(1)} ` + pts.map((p, i) => `L ${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ') + ` L ${x(pts.length - 1).toFixed(1)} ${y(lo).toFixed(1)} Z`;
-    g += `<path d="${area}" style="fill:var(--c-${col}); opacity:.1"/>`;
-    g += `<polyline points="${pl}" fill="none" style="stroke:var(--c-${col})" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
-    pts.forEach((p, i) => { if (pts.length <= 8 || i === pts.length - 1) g += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${i === pts.length - 1 ? 3 : 2}" style="fill:var(--c-${col})"/>`; });
+    if (lo < 0 && hi > 0) g += `<line x1="${L}" x2="${W - R}" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}" style="stroke:var(--label-3); stroke-width:.9"/>`;
     const step = Math.max(1, Math.ceil(pts.length / 6));
-    pts.forEach((p, i) => { if (i % step === 0 || i === pts.length - 1) g += `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(mesCorto(p.ym))}</text>`; });
-    return `<svg class="bars" viewBox="0 0 ${W} ${H}" role="img" aria-label="Patrimonio neto en el tiempo">${g}</svg>`;
+    pts.forEach((p, i) => {
+      const cx = L + colW * i + colW / 2, bx = cx - bw / 2, yv = y(p.v), top = Math.min(yv, y0), hgt = Math.max(1.4, Math.abs(yv - y0)), col = p.v >= 0 ? 'green' : 'red';
+      g += `<rect data-bar="${i}" x="${bx.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${hgt.toFixed(1)}" rx="2.5" style="fill:var(--c-${col})"/>`;
+      g += `<rect class="pat-hit" x="${(L + colW * i).toFixed(1)}" y="${T}" width="${colW.toFixed(1)}" height="${ph}" data-pat="${i}" data-ym="${p.ym}" data-v="${p.v}" tabindex="0" role="button" aria-label="${esc(mesCorto(p.ym))} ${p.ym.slice(0, 4)}: ${esc(money(p.v))}" style="fill:transparent; cursor:pointer"/>`;
+      if (i % step === 0 || i === pts.length - 1) g += `<text x="${cx.toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(mesCorto(p.ym))}</text>`;
+    });
+    return `<svg class="bars pat-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Patrimonio neto por mes">${g}</svg>`;
+  }
+  function selPatrimonio(hit) {
+    const svg = hit.closest('svg'), card = hit.closest('.card'); if (!svg || !card) return;
+    const i = +hit.dataset.pat;
+    svg.querySelectorAll('[data-bar]').forEach((bb) => { bb.style.opacity = (+bb.dataset.bar === i ? '1' : '.38'); });
+    const sel = card.querySelector('#pat-sel'); if (sel) sel.innerHTML = `<b style="color:var(--label)">${esc(mesCorto(hit.dataset.ym))} ${hit.dataset.ym.slice(0, 4)}</b> · ${esc(money(+hit.dataset.v))}`;
   }
 
   // ================= Gráficas =================
@@ -1235,7 +1242,7 @@
     html += `<section class="section"><div class="sh"><h2>Lo que tienes</h2><button class="link sm" type="button" data-act="tab" data-v="cuentas">Cuentas</button></div><div class="card"><p class="muted" style="font-size:15px">Patrimonio neto</p><p class="big ${pat.neto < -0.005 ? 'neg' : ''}" style="font:700 34px/1.15 var(--font-r)">${money(pat.neto)}</p>
       <dl class="kv"><div><dt>Bancos y efectivo</dt><dd>${money(pat.efectivo)}</dd></div>${pat.inv ? `<div><dt>Inversiones</dt><dd>${money(pat.inv)}</dd></div>` : ''}${pat.ret ? `<div><dt>Retiro</dt><dd>${money(pat.ret)}</dd></div>` : ''}<div><dt>Tarjetas de crédito</dt><dd class="${pat.tarj < -0.005 ? 'neg' : ''}">${money(pat.tarj)}</dd></div><div><dt>Préstamos</dt><dd class="${pat.prest > 0.005 ? 'neg' : ''}">${pat.prest > 0.005 ? '−' : ''}${moneyAbs(pat.prest)}</dd></div></dl></div></section>`;
     const serie = seriePatrimonio();
-    if (serie.length >= 2) { const dif = serie[serie.length - 1].v - serie[0].v; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Patrimonio en el tiempo</h3><span class="${dif >= 0 ? 'pos' : 'neg'}" style="font-size:15px; font-weight:600">${dif >= 0 ? '+' : '−'}${moneyAbs(dif)}</span></div><p class="muted" style="font-size:13px; margin:0 0 6px">Desde ${esc(mesCorto(serie[0].ym))} ${serie[0].ym.slice(0, 4)}</p>${lineaPatrimonio(serie)}</section>`; }
+    if (serie.length >= 2) { const dif = serie[serie.length - 1].v - serie[0].v, ult = serie[serie.length - 1]; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Patrimonio en el tiempo</h3><span class="${dif >= 0 ? 'pos' : 'neg'}" style="font-size:15px; font-weight:600">${dif >= 0 ? '+' : '−'}${moneyAbs(dif)}</span></div><p class="muted" id="pat-sel" style="font-size:14px; margin:0 0 8px"><b style="color:var(--label)">${esc(mesCorto(ult.ym))} ${ult.ym.slice(0, 4)}</b> · ${money(ult.v)}</p>${barrasPatrimonio(serie)}</section>`; }
 
     const gastosCat = Object.entries(d.st.porCat).map(([k, v]) => ({ c: cat(k), k, v })).filter((x) => (x.c ? x.c.tipo === 'gasto' : x.k === '_g') && x.v > 0).sort((a, b) => b.v - a.v);
     const top = gastosCat.slice(0, 5).map((x) => ({ v: x.v, color: x.c ? x.c.color : 'gray', n: x.c ? x.c.nombre : 'Sin categoría' }));
@@ -2411,6 +2418,8 @@
     guardar(); actualizarDetalle();
   }
   document.addEventListener('input', (e) => { if (e.target.matches && e.target.matches('input.abono')) guardarAbono(e.target, false); });
+  document.addEventListener('click', (e) => { const h = e.target.closest('[data-pat]'); if (h) selPatrimonio(h); });
+  document.addEventListener('keydown', (e) => { if (e.key !== 'Enter' && e.key !== ' ') return; const h = e.target.closest && e.target.closest('[data-pat]'); if (h) { e.preventDefault(); selPatrimonio(h); } });
   document.addEventListener('change', (e) => { if (e.target.matches && e.target.matches('input.abono')) guardarAbono(e.target, true); });
   window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VISTAS[v] && v !== vista) { vista = v; prestAbierto = null; render(); } });
 
