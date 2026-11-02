@@ -1321,11 +1321,50 @@
   const lineaD = (label, v, opt = {}) => `<${opt.k ? 'button type="button"' : 'div'} class="row ${opt.k ? '' : 'plain'}" ${opt.k ? `data-act="desglose" data-k="${opt.k}"${opt.extra || ''}` : 'style="cursor:default"'}><span class="rt"><span class="t1" style="white-space:normal${opt.bold ? ';font-weight:700' : ''}">${esc(label)}</span>${opt.sub ? `<span class="t2">${esc(opt.sub)}</span>` : ''}</span><span class="amt ${opt.cls || ''}" ${opt.bold ? 'style="font-weight:700"' : ''}>${v}</span>${opt.k ? `<span class="chev">${IC.der}</span>` : ''}</${opt.k ? 'button' : 'div'}>`;
   const grupoD = (titulo, filas, vacio) => `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">${esc(titulo)}</p>${filas.length ? `<div class="group">${filas.join('')}</div>` : `<div class="group"><div class="row plain" style="cursor:default"><span class="rt"><span class="t2">${esc(vacio || 'Nada por aquí todavía.')}</span></span></div></div>`}</div>`;
   const filaCtaD = (c, v) => `<button class="row" type="button" data-act="ver-mov-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2">${esc(TIPOS_CUENTA[c.tipo].n)}</span></span><span class="amt ${v < -0.005 ? 'neg' : ''}">${money(v)}</span></button>`;
+  function planMes(ym) {
+    const st = statsMes(ym), pa = planAhorro(), cuotas = cuotasMes(ym), ip = ingresoPlan(ym), ing = ip.v;
+    const gastos = S.categorias.filter((c) => c.tipo === 'gasto'), prom = promediosCat(ym);
+    const lim = (c) => limiteDe(c, prom, cuotas);
+    const cuentaC = (c) => Math.max(lim(c).v, st.porCat[c.id] || 0);
+    const porGrupo = (g) => suma(gastos.filter((c) => c.grupo === g).map(cuentaC));
+    const sinCat = st.porCat._g || 0;
+    const nec = porGrupo('necesidades'), gus = porGrupo('gustos') + sinCat, deu = porGrupo('deuda');
+    const amP = ahorroMes(ym), ahV = Math.max(pa.plan, amP.neto);
+    return { st, pa, ip, ing, gastos, lim, cuenta: cuentaC, sinCat, nec, gus, deu, amP, ahV, libre: ing - (nec + gus + deu + ahV) };
+  }
+  function desglosePlan(k, data) {
+    const ym = data.ym || mesPres, P = planMes(ym), mes = nombreMes(ym).toLowerCase();
+    const NG = { necesidades: 'Necesidades', gustos: 'Gustos', deuda: 'Deudas' };
+    if (k === 'plan') {
+      const l = [
+        lineaD(etiquetaIngreso(P.ip), money(P.ing), { cls: 'pos' }),
+        lineaD('Necesidades', (P.nec > 0.005 ? '−' + moneyAbs(P.nec) : money(0)), { k: 'plangrupo', extra: ` data-g="necesidades" data-ym="${ym}"` }),
+        lineaD('Gustos', (P.gus > 0.005 ? '−' + moneyAbs(P.gus) : money(0)), { k: 'plangrupo', extra: ` data-g="gustos" data-ym="${ym}"` }),
+        lineaD('Deudas', (P.deu > 0.005 ? '−' + moneyAbs(P.deu) : money(0)), { k: 'plangrupo', extra: ` data-g="deuda" data-ym="${ym}"` }),
+        lineaD('Ahorro', (P.ahV > 0.005 ? '−' + moneyAbs(P.ahV) : money(0)), { k: 'ahorro' }),
+        lineaD(P.libre < -0.005 ? 'Te pasas de tu ingreso' : 'Sin asignar', money(P.libre), { bold: true, cls: P.libre < -0.005 ? 'neg' : '' })
+      ];
+      const nota = P.libre < -0.005
+        ? `Lo que planeas gastar y ahorrar en ${mes} es más que tu ingreso. Baja el límite de alguna categoría o revisa tus gastos.`
+        : `Es la parte de tu ingreso de ${mes} que no está repartida en ningún límite de categoría ni en el ahorro. No es un gasto: es dinero libre. Puedes dejarlo así, subir el límite de alguna categoría o ahorrarlo.`;
+      return { titulo: P.libre < -0.005 ? 'Te pasas de tu ingreso' : 'Sin asignar', total: money(P.libre), nota, cuerpo: grupoD('Cómo se calcula', l) };
+    }
+    if (k === 'plangrupo') {
+      const g = data.g, cs = P.gastos.filter((c) => c.grupo === g).map((c) => ({ c, l: P.lim(c), gast: P.st.porCat[c.id] || 0, v: P.cuenta(c) })).filter((x) => x.v > 0.005 || x.l.v > 0.005).sort((a, b) => b.v - a.v);
+      const filas = cs.map((x) => `<button class="row" type="button" data-act="editar-cat" data-id="${x.c.id}">${icCat(x.c)}<span class="rt"><span class="t1">${esc(x.c.nombre)}</span><span class="t2">Límite ${money(x.l.v)}${x.l.auto ? ' (automático)' : ''} · gastado ${money(x.gast)}</span></span><span class="amt">${money(x.v)}</span></button>`);
+      if (g === 'gustos' && P.sinCat > 0.005) filas.push(`<button class="row" type="button" data-act="desglose" data-k="cat" data-id="_g" data-ym="${ym}">${icCat(null)}<span class="rt"><span class="t1">Sin categoría</span><span class="t2">Gastos a los que no les pusiste categoría</span></span><span class="amt">${money(P.sinCat)}</span><span class="chev">${IC.der}</span></button>`);
+      const total = g === 'necesidades' ? P.nec : g === 'gustos' ? P.gus : P.deu;
+      return { titulo: NG[g], total: money(total), nota: 'Cada categoría cuenta con su límite, o con lo que ya gastaste si es más. Toca una para cambiar su límite.', cuerpo: grupoD(nombreMes(ym), filas, 'No hay categorías con límite o gastos aquí.') };
+    }
+    return null;
+  }
   function sheetDesglose(k, data) {
     const ym = data && data.ym ? data.ym : ymHoy(), d = disponible(ymHoy()), sal = saldos(), pat = patrimonio(sal);
     const neg = (v) => (v > 0.005 ? '−' + moneyAbs(v) : money(0));
     let titulo = '', total = '', nota = '', cuerpo = '';
-    if (k === 'libre') {
+    const rp = (k === 'plan' || k === 'plangrupo') ? desglosePlan(k, data || {}) : null;
+    if (rp) { titulo = rp.titulo; total = rp.total; nota = rp.nota; cuerpo = rp.cuerpo; }
+    else if (k === 'libre') {
       titulo = 'Puedes gastar este mes'; total = money(d.libre);
       nota = 'Es lo que te queda del ingreso del mes después de apartar el ahorro, lo que ya gastaste y lo que todavía falta pagar. Toca cada línea para ver el detalle.';
       cuerpo = grupoD('Cómo se calcula', [
@@ -1572,7 +1611,7 @@
       html += `<section class="hero"><p class="k">Tu plan del mes</p><p class="hint">Registra tus ingresos de este mes y el plan se arma solo, repartiendo tu dinero entre necesidades, gustos, deudas y ahorro. También puedes escribir tu ingreso fijo.</p><div style="display:flex; gap:10px; flex-wrap:wrap"><button class="btn" type="button" data-act="nuevo-mov" data-tipo="ingreso">Registrar un ingreso</button><button class="btn tinted" type="button" data-act="config-pres">Escribirlo</button></div></section>`;
     } else {
       const base = Math.max(ing, asignado) || 1;
-      const segs = [['Necesidades', nec, 'blue'], ['Gustos', gus, 'purple'], ['Deudas', deu, 'orange'], ['Ahorro', ahV, 'green']];
+      const segs = [['Necesidades', nec, 'blue', `data-k="plangrupo" data-g="necesidades"`], ['Gustos', gus, 'purple', `data-k="plangrupo" data-g="gustos"`], ['Deudas', deu, 'orange', `data-k="plangrupo" data-g="deuda"`], ['Ahorro', ahV, 'green', `data-k="ahorro"`]];
       const guia = [
         ['Necesidades y deudas', nec + deu, 0.5, 'hasta'],
         ['Gustos', gus, 0.3, 'hasta'],
@@ -1580,9 +1619,9 @@
       ];
       html += `<section class="card"><div class="sh" style="margin-bottom:4px"><h3>Tu plan del mes</h3><span class="muted" style="font-size:15px">Ingreso ${money(ing)}${ip.fuente === 'manual' ? '' : ' · automático'}</span></div>
         <div class="stack" style="margin-top:10px">${segs.filter((s) => s[1] > 0).map((s) => `<i style="--c:var(--c-${s[2]});width:${(s[1] / base * 100).toFixed(2)}%"></i>`).join('')}</div>
-        <div class="legend">${segs.map((s) => `<div style="--c:var(--c-${s[2]})"><b></b><span>${s[0]}</span><em>${pct(s[1] / ing * 100)}</em><strong>${money(s[1])}</strong></div>`).join('')}
-          <div style="--c:var(--${libre < -0.005 ? 'neg' : 'fill-2'})"><b></b><span>${libre < -0.005 ? 'Te pasas de tu ingreso' : 'Sin asignar'}</span><em>${pct(Math.abs(libre) / ing * 100)}</em><strong class="${libre < -0.005 ? 'neg' : ''}">${money(libre)}</strong></div></div>
-        <p class="muted" style="font-size:13px; margin-top:10px">Cada categoría cuenta con su límite, o con lo que ya gastaste si es más. ${sinCat > 0.005 ? `Los ${money(sinCat)} sin categoría van en Gustos.` : ''}</p>
+        <div class="legend">${segs.map((s) => `<div class="tap" data-act="desglose" ${s[3]} data-ym="${ym}" style="--c:var(--c-${s[2]})"><b></b><span>${s[0]}</span><em>${pct(s[1] / ing * 100)}</em><strong>${money(s[1])}</strong></div>`).join('')}
+          <div class="tap" data-act="desglose" data-k="plan" data-ym="${ym}" style="--c:var(--${libre < -0.005 ? 'neg' : 'fill-2'})"><b></b><span>${libre < -0.005 ? 'Te pasas de tu ingreso' : 'Sin asignar'}</span><em>${pct(Math.abs(libre) / ing * 100)}</em><strong class="${libre < -0.005 ? 'neg' : ''}">${money(libre)}</strong></div></div>
+        <p class="muted" style="font-size:13px; margin-top:10px">Toca cada parte para ver de qué se forma. «Sin asignar» es la parte de tu ingreso que todavía no está en ningún límite ni en el ahorro. Cada categoría cuenta con su límite, o con lo que ya gastaste si es más. ${sinCat > 0.005 ? `Los ${money(sinCat)} sin categoría van en Gustos.` : ''}</p>
         <div class="guide"><p class="muted" style="font-size:13px">Guía 50/30/20 para tu ingreso</p>${guia.map(([n, v, f, modo]) => { const lim = ing * f, ok = modo === 'hasta' ? v <= lim + 0.005 : v >= lim - 0.005; return `<div><span>${n}: ${modo} ${money(lim)}</span><span class="${ok ? 'ok' : 'bad'}">${ok ? (n === 'Ahorro' && amP.neto > 0.005 ? 'Vas bien · llevas ' + money(amP.neto) : 'Vas bien') : modo === 'hasta' ? 'Te pasas ' + money(v - lim) : 'Faltan ' + money(lim - v)}</span></div>`; }).join('')}</div></section>`;
     }
 
