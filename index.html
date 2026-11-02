@@ -1004,6 +1004,49 @@
     const prest = suma(S.prestamos.filter((p) => p.enPatrimonio !== false).map((p) => amortizar(p).saldoHoy));
     return { efectivo, inv, ret, tarj, prest, neto: efectivo + inv + ret + tarj - prest };
   }
+  function saldoPrestamoEn(p, iso) {
+    const a = amortizar(p); let bal = p.monto;
+    for (const r of a.rows) { if (r.fin) continue; if (isoDe(r.fecha) <= iso) bal = r.saldo; else break; }
+    return Math.max(0, bal);
+  }
+  function patrimonioEn(iso) {
+    let v = 0;
+    S.cuentas.forEach((c) => {
+      if (c.tipo === 'retiro') { const hist = c.historial || []; const h = hist.filter((e) => e.f <= iso); v += h.length ? h[h.length - 1].v : (hist.length ? hist[0].v : c.saldoInicial); }
+      else v += saldoAl(c, iso);
+    });
+    S.prestamos.forEach((p) => { if (p.enPatrimonio === false) return; v -= saldoPrestamoEn(p, iso); });
+    return v;
+  }
+  function seriePatrimonio() {
+    let earliest = hoyISO();
+    const low = (d) => { if (d && d < earliest) earliest = d; };
+    S.movimientos.forEach((m) => low(m.fecha));
+    S.cuentas.forEach((c) => { if (c.creado) low(/^\d{4}-\d{2}-\d{2}/.test(c.creado) ? c.creado.slice(0, 10) : isoDe(new Date(c.creado))); (c.historial || []).forEach((h) => low(h.f)); });
+    S.prestamos.forEach((p) => { if (p.enPatrimonio !== false) low(p.fecha); });
+    const cur = ymHoy(), hoy = hoyISO(); let ym = earliest.slice(0, 7); const meses = [];
+    while (ym <= cur && meses.length < 60) { meses.push(ym); ym = addMes(ym, 1); }
+    return (meses.length > 24 ? meses.slice(-24) : meses).map((m) => ({ ym: m, v: patrimonioEn(m === cur ? hoy : m + '-' + pad(diasDelMes(m))) }));
+  }
+  function lineaPatrimonio(pts) {
+    const W = 340, H = 176, L = 42, R = 8, T = 12, B = 26, ph = H - T - B, pw = W - L - R;
+    const vals = pts.map((p) => p.v); let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+    if (hi - lo < 1) hi = lo + 1; const padv = (hi - lo) * 0.12; lo -= padv; hi += padv;
+    const x = (i) => L + (pts.length === 1 ? pw / 2 : (i / (pts.length - 1)) * pw);
+    const y = (v) => T + ph - ((v - lo) / (hi - lo)) * ph;
+    let g = '';
+    [lo, (lo + hi) / 2, hi].forEach((mv) => { const yy = y(mv).toFixed(1); g += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}"/><text x="${L - 6}" y="${(+yy + 3.5).toFixed(1)}" text-anchor="end">${compact(mv)}</text>`; });
+    if (lo < 0 && hi > 0) { const yz = y(0).toFixed(1); g += `<line x1="${L}" x2="${W - R}" y1="${yz}" y2="${yz}" style="stroke:var(--label-3); stroke-width:.9"/>`; }
+    const col = vals[vals.length - 1] >= 0 ? 'green' : 'red';
+    const pl = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const area = `M ${x(0).toFixed(1)} ${y(lo).toFixed(1)} ` + pts.map((p, i) => `L ${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ') + ` L ${x(pts.length - 1).toFixed(1)} ${y(lo).toFixed(1)} Z`;
+    g += `<path d="${area}" style="fill:var(--c-${col}); opacity:.1"/>`;
+    g += `<polyline points="${pl}" fill="none" style="stroke:var(--c-${col})" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    pts.forEach((p, i) => { if (pts.length <= 8 || i === pts.length - 1) g += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${i === pts.length - 1 ? 3 : 2}" style="fill:var(--c-${col})"/>`; });
+    const step = Math.max(1, Math.ceil(pts.length / 6));
+    pts.forEach((p, i) => { if (i % step === 0 || i === pts.length - 1) g += `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(mesCorto(p.ym))}</text>`; });
+    return `<svg class="bars" viewBox="0 0 ${W} ${H}" role="img" aria-label="Patrimonio neto en el tiempo">${g}</svg>`;
+  }
 
   // ================= Gráficas =================
   function donut(items, total) {
@@ -1165,6 +1208,8 @@
 
     html += `<section class="section"><div class="sh"><h2>Lo que tienes</h2><button class="link sm" type="button" data-act="tab" data-v="cuentas">Cuentas</button></div><div class="card"><p class="muted" style="font-size:15px">Patrimonio neto</p><p class="big ${pat.neto < -0.005 ? 'neg' : ''}" style="font:700 34px/1.15 var(--font-r)">${money(pat.neto)}</p>
       <dl class="kv"><div><dt>Bancos y efectivo</dt><dd>${money(pat.efectivo)}</dd></div>${pat.inv ? `<div><dt>Inversiones</dt><dd>${money(pat.inv)}</dd></div>` : ''}${pat.ret ? `<div><dt>Retiro</dt><dd>${money(pat.ret)}</dd></div>` : ''}<div><dt>Tarjetas de crédito</dt><dd class="${pat.tarj < -0.005 ? 'neg' : ''}">${money(pat.tarj)}</dd></div><div><dt>Préstamos</dt><dd class="${pat.prest > 0.005 ? 'neg' : ''}">${pat.prest > 0.005 ? '−' : ''}${moneyAbs(pat.prest)}</dd></div></dl></div></section>`;
+    const serie = seriePatrimonio();
+    if (serie.length >= 2) { const dif = serie[serie.length - 1].v - serie[0].v; html += `<section class="card"><div class="sh" style="margin-bottom:2px"><h3>Patrimonio en el tiempo</h3><span class="${dif >= 0 ? 'pos' : 'neg'}" style="font-size:15px; font-weight:600">${dif >= 0 ? '+' : '−'}${moneyAbs(dif)}</span></div><p class="muted" style="font-size:13px; margin:0 0 6px">Desde ${esc(mesCorto(serie[0].ym))} ${serie[0].ym.slice(0, 4)}</p>${lineaPatrimonio(serie)}</section>`; }
 
     const gastosCat = Object.entries(d.st.porCat).map(([k, v]) => ({ c: cat(k), k, v })).filter((x) => (x.c ? x.c.tipo === 'gasto' : x.k === '_g') && x.v > 0).sort((a, b) => b.v - a.v);
     const top = gastosCat.slice(0, 5).map((x) => ({ v: x.v, color: x.c ? x.c.color : 'gray', n: x.c ? x.c.nombre : 'Sin categoría' }));
