@@ -684,7 +684,7 @@
       historial: Array.isArray(c.historial) ? c.historial.filter((h) => h && /^\d{4}-\d{2}-\d{2}$/.test(h.f || '')).map((h) => ({ f: h.f, v: num(h.v) })).slice(-60) : [],
       diaPago: Math.min(31, Math.max(0, Math.round(num(c.diaPago)))), diaCorte: Math.min(31, Math.max(0, Math.round(num(c.diaCorte)))),
       saldoCorte: c.saldoCorte && /^\d{4}-\d{2}-\d{2}$/.test(c.saldoCorte.f || '') ? { f: c.saldoCorte.f, v: Math.max(0, num(c.saldoCorte.v)) } : null,
-      autopago: c.autopago && c.autopago.cuentaId ? { cuentaId: String(c.autopago.cuentaId), hasta: /^\d{4}-\d{2}-\d{2}$/.test(c.autopago.hasta || '') ? c.autopago.hasta : '' } : null,
+      autopago: c.autopago && c.autopago.cuentaId ? { cuentaId: String(c.autopago.cuentaId), hasta: /^\d{4}-\d{2}-\d{2}$/.test(c.autopago.hasta || '') ? c.autopago.hasta : '', pendiente: c.autopago.pendiente && /^\d{4}-\d{2}-\d{2}$/.test(c.autopago.pendiente.corte || '') && /^\d{4}-\d{2}-\d{2}$/.test(c.autopago.pendiente.venc || '') ? { corte: c.autopago.pendiente.corte, venc: c.autopago.pendiente.venc } : null } : null,
       tasaTarjeta: Math.max(0, num(c.tasaTarjeta)), pagoMinimo: Math.max(0, num(c.pagoMinimo))
     }));
     const ids = new Set(out.cuentas.map((c) => c.id));
@@ -1042,17 +1042,20 @@
       const fuente = cuenta(ap.cuentaId);
       if (!fuente || fuente.id === c.id) return;
       const hasta = ap.hasta || hoy, start = parseISO(hasta), pares = [];
-      for (let k = 0; k <= 18; k++) {
+      for (let k = -3; k <= 18; k++) {
         const d = new Date(start.getFullYear(), start.getMonth() + k, 1);
         const corteDate = fechaDia(d.getFullYear(), d.getMonth(), c.diaCorte), vencDate = diaDespues(c.diaPago, corteDate);
         if (vencDate > hasta && vencDate <= hoy) pares.push([corteDate, vencDate]);
       }
       pares.sort((a, b) => a[1].localeCompare(b[1]));
-      pares.forEach(([corteDate, vencDate]) => {
+      for (const [corteDate, vencDate] of pares) {
+        if (S.movimientos.some((x) => x.autopagoDe === c.id && x.fecha === vencDate)) { ap.hasta = vencDate; ap.pendiente = null; cambio = true; continue; }
+        const conocido = (c.saldoCorte && c.saldoCorte.f === corteDate) || corteDate >= inicioCuenta(c);
+        if (!conocido) { if (!ap.pendiente || ap.pendiente.venc !== vencDate) { ap.pendiente = { corte: corteDate, venc: vencDate }; cambio = true; } break; }
         const monto = Math.round(Math.max(0, deudaAlCorte(c, corteDate) - abonosEntre(c, corteDate, vencDate)) * 100) / 100;
         if (monto > 0.005) { S.movimientos.push({ id: nuevoId('m'), tipo: 'transferencia', monto, cuentaId: fuente.id, cuentaDestinoId: c.id, categoriaId: null, fecha: vencDate, nota: 'Pago automático', posteado: false, recurrenteId: null, autopagoDe: c.id, creado: new Date().toISOString() }); n++; }
-        ap.hasta = vencDate; cambio = true;
-      });
+        ap.hasta = vencDate; ap.pendiente = null; cambio = true;
+      }
     });
     if (cambio) guardar();
     return n;
@@ -1490,6 +1493,9 @@
     const rc = recordatorioCopia();
     if (rc) html += `<section class="card aviso"><span class="ic" style="--c:var(--c-orange)">${IC.caja}</span><div class="rt" style="flex:1 1 180px"><span class="t1" style="white-space:normal; font-weight:600">${rc.nunca ? 'Todavía no guardas una copia' : `Hace ${rc.dias} ${rc.dias === 1 ? 'día' : 'días'} que no guardas una copia`}</span><span class="t2" style="white-space:normal">Guárdala en iCloud Drive o donde prefieras, por si cambias o pierdes el teléfono.</span></div><div class="aviso-btns"><button class="btn small" type="button" data-act="guardar-copia">Guardar copia</button><button class="link sm" type="button" data-act="posponer-copia">Mañana</button></div></section>`;
 
+    S.cuentas.filter((c) => c.tipo === 'tarjeta' && c.autopago && c.autopago.pendiente).forEach((c) => {
+      html += `<section class="card aviso"><span class="ic sq ic-color">${ICC.tarjeta}</span><div class="rt" style="flex:1 1 180px"><span class="t1" style="white-space:normal; font-weight:600">Pago automático de ${esc(c.nombre)} · ${fCorta(c.autopago.pendiente.venc)}</span><span class="t2" style="white-space:normal">No sé de cuánto fue el estado de cuenta del ${fCorta(c.autopago.pendiente.corte)}. Escribe el saldo de ese corte y lo registro.</span></div><div class="aviso-btns"><button class="btn small" type="button" data-act="editar-cuenta" data-id="${c.id}">Escribir saldo</button></div></section>`;
+    });
     const pasos = [
       { ok: S.cuentas.length > 0, t: 'Agrega tus cuentas', s: 'Cheques, ahorro, efectivo y tarjetas', act: 'nueva-cuenta' },
       { ok: S.config.ingresoMensual > 0 || S.movimientos.some((m) => m.tipo === 'ingreso'), t: 'Registra tus ingresos', s: 'Tu sueldo o lo que te paga tu negocio', act: 'nuevo-mov', tipo: 'ingreso' },
@@ -2054,6 +2060,7 @@
     const efecto = c ? actual - c.saldoInicial : 0;
     const esRet = c && c.tipo === 'retiro';
     const b = abrirSheet(`<form id="form-cta" novalidate>${cabeza(c ? (esRet ? 'Actualizar saldo' : 'Editar cuenta') : 'Nueva cuenta')}<div style="display:grid; gap:18px">
+      ${c && c.autopago && c.autopago.pendiente ? `<p class="warn-box" style="margin:0">Para registrar el pago automático del ${fCorta(c.autopago.pendiente.venc)}, escribe abajo en «Saldo del último corte» el <b>statement balance</b> del corte del ${fCorta(c.autopago.pendiente.corte)} y toca Guardar.</p>` : ''}
       <div class="group">
         <div class="frow"><label for="a-nombre">Nombre</label><input id="a-nombre" type="text" placeholder="Ej. Chase cheques" value="${c ? esc(c.nombre) : ''}" autocomplete="off" ${esRet ? '' : 'autofocus'}></div>
         <div class="frow"><label for="a-tipo">Tipo</label><select id="a-tipo">${Object.entries(TIPOS_CUENTA).map(([k, t]) => `<option value="${k}" ${(c ? c.tipo : 'cheques') === k ? 'selected' : ''}>${t.n}</option>`).join('')}</select></div>
@@ -2093,16 +2100,16 @@
       const diaPago = tipo === 'tarjeta' ? +$('#a-pago', b).value : 0, diaCorte = tipo === 'tarjeta' ? +$('#a-corte', b).value : 0;
       const apSel = tipo === 'tarjeta' && diaCorte && diaPago && $('#a-auto', b) ? $('#a-auto', b).value : '';
       const prevAp = c && c.autopago;
-      const autopago = apSel && cuenta(apSel) && cuenta(apSel).tipo !== 'tarjeta' ? { cuentaId: apSel, hasta: prevAp && prevAp.cuentaId === apSel && prevAp.hasta ? prevAp.hasta : hoyISO() } : null;
+      const autopago = apSel && cuenta(apSel) && cuenta(apSel).tipo !== 'tarjeta' ? { cuentaId: apSel, hasta: prevAp && prevAp.cuentaId === apSel && prevAp.hasta ? prevAp.hasta : isoDe(new Date(parseISO(hoyISO()) - 864e5)), pendiente: prevAp && prevAp.cuentaId === apSel ? prevAp.pendiente || null : null } : null;
       const scRaw = $('#a-scorte', b).value.trim();
-      const saldoCorte = tipo === 'tarjeta' && diaCorte && scRaw !== '' && !isNaN(parseMonto(scRaw)) ? { f: diaEnOAntes(diaCorte, hoyISO()), v: Math.max(0, parseMonto(scRaw)) } : null;
+      const saldoCorte = tipo === 'tarjeta' && diaCorte && scRaw !== '' && !isNaN(parseMonto(scRaw)) ? { f: autopago && autopago.pendiente ? autopago.pendiente.corte : diaEnOAntes(diaCorte, hoyISO()), v: Math.max(0, parseMonto(scRaw)) } : null;
       const hist = c ? c.historial.slice() : [];
       if (tipo === 'retiro' && (!hist.length || Math.abs(hist[hist.length - 1].v - deseado) > 0.004)) {
         if (hist.length && hist[hist.length - 1].f === hoyISO()) hist[hist.length - 1].v = deseado; else hist.push({ f: hoyISO(), v: deseado });
       }
       if (c) { Object.assign(c, { nombre, tipo, limite: lim, diaPago, diaCorte, saldoCorte, autopago, tasaTarjeta: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-tasa', b).value) || 0) : 0, pagoMinimo: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-min', b).value) || 0) : 0, saldoInicial: deseado - efecto, historial: hist.slice(-60) }); }
       else S.cuentas.push({ id: nuevoId('a'), nombre, tipo, saldoInicial: deseado, limite: lim, diaPago, diaCorte, saldoCorte, autopago, tasaTarjeta: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-tasa', b).value) || 0) : 0, pagoMinimo: tipo === 'tarjeta' ? Math.max(0, parseMonto($('#a-min', b).value) || 0) : 0, creado: new Date().toISOString(), historial: hist });
-      guardar(); cerrarSheet(); toast(c ? (tipo === 'retiro' ? 'Saldo actualizado' : 'Cuenta actualizada') : 'Cuenta agregada'); render();
+      guardar(); cerrarSheet(); toast(c ? (tipo === 'retiro' ? 'Saldo actualizado' : 'Cuenta actualizada') : 'Cuenta agregada'); procesarRecurrentes(); render();
     });
     if (c) {
       if ($('#a-ver', b)) $('#a-ver', b).addEventListener('click', () => { filtro.cuenta = c.id; filtro.cat = ''; filtro.q = ''; cerrarSheet(); ir('movimientos'); });
