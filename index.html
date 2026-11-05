@@ -81,7 +81,7 @@
   .side { display: none; }
   .main { padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
   .content { max-width: 980px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 32px; display: grid; gap: 22px; }
-  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--bar); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-top: .5px solid var(--sep); padding: 6px max(4px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px)); }
+  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(4, 1fr); background: var(--bar); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-top: .5px solid var(--sep); padding: 6px max(4px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px)); }
   .tab { background: none; border: 0; display: grid; justify-items: center; gap: 2px; color: var(--label-2); font: 500 10px/1.2 var(--font); padding: 4px 0; cursor: pointer; position: relative; }
   .tab svg { width: 26px; height: 26px; }
   .tab.on { color: var(--tint); }
@@ -485,6 +485,7 @@
     cuentas: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.6"/><path d="M2.5 9.8h19M6 15h4"/>'),
     prestamos: svg('<path d="M3 9.5 12 4l9 5.5M5 10.5v7M9.7 10.5v7M14.3 10.5v7M19 10.5v7M3 20h18"/>'),
     plus: svg('<path d="M12 5v14M5 12h14"/>', 2.2),
+    lupa: svg('<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>', 2.1),
     ajustes: svg('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/>'),
     izq: svg('<path d="m15 5-7 7 7 7"/>', 2.2),
     der: svg('<path d="m9 5 7 7-7 7"/>', 2.2),
@@ -1526,7 +1527,7 @@
     const ag = agenda(30);
     if (ag.length) html += `<section class="section"><div class="sh"><h2>Próximos 30 días</h2><button class="link sm" type="button" data-act="programados">Programados</button></div><div class="group">${ag.slice(0, 5).map(({ r, f }) => filaRec(r, f, false)).join('')}</div></section>`;
     const ahorroMes = d.st.ing - d.st.gas;
-    html += `<section class="section"><div class="sh"><h2>Este mes</h2><button class="link sm" type="button" data-act="tab" data-v="movimientos">Ver todo</button></div><div class="stats">
+    html += `<section class="section"><div class="sh"><h2>Este mes</h2><button class="link sm" type="button" data-act="todos-mov">Ver todo</button></div><div class="stats">
       <div class="stat tap" data-act="desglose" data-k="recibidos"><p class="k">Ingresos</p><p class="v pos">${money(d.st.ing)}</p></div>
       <div class="stat tap" data-act="desglose" data-k="gastos"><p class="k">Gastos</p><p class="v">${money(d.st.gas)}</p></div>
       <div class="stat tap" data-act="desglose" data-k="quedo"><p class="k">Te quedó</p><p class="v ${ahorroMes < -0.005 ? 'neg' : ''}">${money(ahorroMes)}</p><p class="s">${d.st.ing > 0 ? pct(ahorroMes / d.st.ing * 100) + ' de tus ingresos' : '—'}</p></div>
@@ -1550,7 +1551,7 @@
     </div>`;
 
     const rec = S.movimientos.slice().sort(ordenMov).slice(0, 6);
-    html += `<section class="section"><div class="sh"><h2>Recientes</h2>${rec.length ? '<button class="link sm" type="button" data-act="tab" data-v="movimientos">Ver todos</button>' : ''}</div>${rec.length ? `<div class="group">${rec.map(filaMov).join('')}</div>` : '<div class="empty">Tus últimos movimientos aparecerán aquí.</div>'}</section>`;
+    html += `<section class="section"><div class="sh"><h2>Recientes</h2>${rec.length ? '<button class="link sm" type="button" data-act="todos-mov">Ver todos</button>' : ''}</div>${rec.length ? `<div class="group">${rec.map(filaMov).join('')}</div>` : '<div class="empty">Tus últimos movimientos aparecerán aquí.</div>'}</section>`;
     return html;
   }
 
@@ -1560,8 +1561,8 @@
   function vMovimientos() {
     const opsC = S.cuentas.filter((c) => c.tipo !== 'retiro').map((c) => `<option value="${c.id}" ${filtro.cuenta === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
     const opsK = S.categorias.map((c) => `<option value="${c.id}" ${filtro.cat === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
-    return encabezado('Movimientos', '', `<button class="btn small tinted" type="button" data-act="programados">Programados${S.recurrentes.length ? ' · ' + S.recurrentes.length : ''}</button>${btnMas('nuevo-mov', 'Nuevo movimiento')}`) + mnav('mes-mov', mesMov) +
-      `<div class="filters"><select id="f-cuenta" aria-label="Filtrar por cuenta"><option value="">Todas las cuentas</option>${opsC}</select><select id="f-cat" aria-label="Filtrar por categoría"><option value="">Todas las categorías</option><option value="_sin" ${filtro.cat === '_sin' ? 'selected' : ''}>Sin categoría</option>${opsK}</select><select id="f-estado" aria-label="Filtrar por estado en el banco"><option value="">Posteados y pendientes</option><option value="pend" ${filtro.estado === 'pend' ? 'selected' : ''}>Solo pendientes</option><option value="post" ${filtro.estado === 'post' ? 'selected' : ''}>Solo posteados</option></select><input id="f-q" type="search" placeholder="Buscar por descripción o categoría" value="${esc(filtro.q)}" autocomplete="off"></div><div id="mov-lista" style="display:grid; gap:14px"></div>`;
+    return `<button class="back" type="button" data-act="tab" data-v="cuentas">${IC.izq}Cuentas</button>` + encabezado('Todos los movimientos', '', `<button class="btn small tinted" type="button" data-act="programados">Programados${S.recurrentes.length ? ' · ' + S.recurrentes.length : ''}</button>${btnMas('nuevo-mov', 'Nuevo movimiento')}`) + mnav('mes-mov', mesMov) +
+      `<div class="filters"><select id="f-cuenta" aria-label="Filtrar por cuenta"><option value="">Todas las cuentas</option>${opsC}</select><select id="f-cat" aria-label="Filtrar por categoría"><option value="">Todas las categorías</option><option value="_sin" ${filtro.cat === '_sin' ? 'selected' : ''}>Sin categoría</option>${opsK}</select><select id="f-estado" aria-label="Filtrar por estado en el banco"><option value="">Posteados y pendientes</option><option value="pend" ${filtro.estado === 'pend' ? 'selected' : ''}>Solo pendientes</option><option value="post" ${filtro.estado === 'post' ? 'selected' : ''}>Solo posteados</option></select><input id="f-q" type="search" placeholder="Buscar" value="${esc(filtro.q)}" autocomplete="off"></div><div id="mov-lista" style="display:grid; gap:14px"></div>`;
   }
   function renderMovLista() {
     const q = filtro.q.trim().toLowerCase();
@@ -1672,9 +1673,50 @@
   }
 
   // ================= Vista: Cuentas =================
+  let cuentaAbierta = null;
+  function abrirCuenta(id) {
+    const c = cuenta(id); if (!c) return;
+    if (c.tipo === 'retiro') { sheetCuenta(id); return; }
+    cerrarSheet(); cuentaAbierta = id; filtro.cuenta = id; filtro.cat = ''; filtro.q = ''; filtro.estado = '';
+    if (vista !== 'cuentas') { vista = 'cuentas'; history.replaceState(null, '', '#cuentas'); }
+    render(); window.scrollTo(0, 0);
+  }
+  function vCuentaDet(c) {
+    const v = saldos()[c.id], esT = c.tipo === 'tarjeta', t = TIPOS_CUENTA[c.tipo];
+    const otras = S.cuentas.filter((x) => x.tipo !== 'retiro').length > 1;
+    let html = `<button class="back" type="button" data-act="cuenta-volver">${IC.izq}Cuentas</button>`;
+    html += `<header class="vh"><div style="display:flex; align-items:center; gap:12px">${icCuenta(c)}<div><p class="eyebrow">${esc(t ? t.n : '')}</p><h1 class="lt">${esc(c.nombre)}</h1></div></div><div class="vh-act"><button class="btn small tinted" type="button" data-act="editar-cuenta" data-id="${c.id}">Editar</button></div></header>`;
+    let big, sub = '';
+    if (esT) {
+      const deuda = Math.max(0, -v), e = estadoTarjeta(c);
+      big = `<p class="k">${v > 0.005 ? 'Saldo a favor' : 'Deuda total'}</p><p class="big ${deuda > 0.005 ? 'neg' : ''}">${v > 0.005 ? money(v) : moneyAbs(deuda)}</p>`;
+      const ps = [];
+      if (e) { const tx = textoTarjeta(e); ps.push(`<span class="${tx.c === 'neg' ? 'neg' : tx.c === 'pos' ? 'pos' : ''}"${tx.c === 'warn' ? ' style="color:var(--c-orange);font-weight:600"' : ''}>${esc(tx.t)}</span>`); }
+      if (c.limite > 0) ps.push(`Usas ${Math.round(deuda / c.limite * 100)}% de ${money(c.limite)} · disponible ${money(Math.max(0, c.limite - deuda))}`);
+      if (c.diaCorte) ps.push(`Corte el día ${c.diaCorte}${c.diaPago ? ` · pago el día ${c.diaPago}` : ''}${c.autopago && c.autopago.cuentaId ? ' · pago automático activo' : ''}`);
+      sub = ps.map((x) => `<p class="sub" style="margin:0">${x}</p>`).join('');
+    } else {
+      big = `<p class="k">Saldo</p><p class="big ${v < -0.005 ? 'neg' : ''}">${money(v)}</p>`;
+    }
+    let btns = `<button class="btn small" type="button" data-act="nuevo-mov">${IC.plus.replace('<svg', '<svg style="width:18px;height:18px"')}Nuevo movimiento</button>`;
+    if (otras) {
+      if (esT) { const e = estadoTarjeta(c); btns += `<button class="btn small tinted" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e && e.porPagar > 0.005 ? e.porPagar.toFixed(2) : ''}">Pagar${e && e.porPagar > 0.005 ? ' ' + money(e.porPagar) : ''}</button>`; }
+      else btns += `<button class="btn small tinted" type="button" data-act="transferir" data-desde="${c.id}">${IC.flechas.replace('<svg', '<svg style="width:18px;height:18px"')}Transferir</button>`;
+    }
+    html += `<section class="hero">${big}${sub}<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px">${btns}</div></section>`;
+    html += mnav('mes-mov', mesMov);
+    html += `<div class="filters"><select id="f-estado" aria-label="Filtrar por estado en el banco"><option value="">Posteados y pendientes</option><option value="pend" ${filtro.estado === 'pend' ? 'selected' : ''}>Solo pendientes</option><option value="post" ${filtro.estado === 'post' ? 'selected' : ''}>Solo posteados</option></select><input id="f-q" type="search" placeholder="Buscar" value="${esc(filtro.q)}" autocomplete="off"></div><div id="mov-lista" style="display:grid; gap:14px"></div>`;
+    return html;
+  }
+  function montarCuentaDet() {
+    $('#f-estado').addEventListener('change', (e) => { filtro.estado = e.target.value; renderMovLista(); });
+    $('#f-q').addEventListener('input', (e) => { filtro.q = e.target.value; renderMovLista(); });
+    renderMovLista();
+  }
   function vCuentas() {
+    if (cuentaAbierta) { const c = cuenta(cuentaAbierta); if (c && c.tipo !== 'retiro') return vCuentaDet(c); cuentaAbierta = null; }
     const sal = saldos(), pat = patrimonio(sal);
-    let html = encabezado('Cuentas', '', `${S.cuentas.filter((c) => c.tipo !== 'retiro').length > 1 ? `<button class="btn small tinted" type="button" data-act="transferir">${IC.flechas.replace('<svg', '<svg style="width:18px;height:18px"')}Transferir</button>` : ''}${btnMas('nueva-cuenta', 'Nueva cuenta')}`);
+    let html = encabezado('Cuentas', '', `${S.movimientos.length ? `<button class="icon-btn" type="button" data-act="todos-mov" data-foco="1" aria-label="Buscar movimientos">${IC.lupa}</button>` : ''}${S.cuentas.filter((c) => c.tipo !== 'retiro').length > 1 ? `<button class="btn small tinted" type="button" data-act="transferir">${IC.flechas.replace('<svg', '<svg style="width:18px;height:18px"')}Transferir</button>` : ''}${btnMas('nueva-cuenta', 'Nueva cuenta')}`);
     if (!S.cuentas.length) return html + `<div class="empty"><strong>Agrega tus cuentas</strong>Tu cuenta de cheques, de ahorro, el efectivo y tus tarjetas de crédito. Así sabes cuánto tienes y cuánto debes.<button class="btn small" type="button" data-act="nueva-cuenta">Agregar cuenta</button></div>`;
     const deudas = -pat.tarj + pat.prest;
     html += `<div class="stats"><div class="stat"><p class="k">Patrimonio neto</p><p class="v ${pat.neto < -0.005 ? 'neg' : ''}">${money(pat.neto)}</p></div><div class="stat"><p class="k">Tienes</p><p class="v">${money(pat.efectivo + pat.inv + pat.ret)}</p>${pat.ret ? `<p class="s">Incluye ${money(pat.ret)} de retiro</p>` : ''}</div><div class="stat"><p class="k">Debes</p><p class="v ${deudas > 0.005 ? 'neg' : ''}">${money(deudas)}</p><p class="s">Tarjetas y préstamos</p></div></div>`;
@@ -1685,7 +1727,7 @@
       const tot = suma(cs.map((c) => sal[c.id]));
       html += `<section class="section"><div class="sh"><h2>${titulo}</h2><span class="muted" style="font-size:15px">${tipos[0] === 'tarjeta' ? 'Debes ' + moneyAbs(Math.min(0, tot)) : money(tot)}</span></div><div class="group">${cs.map((c) => filaCuenta(c, sal[c.id])).join('')}</div></section>`;
     });
-    html += `<p class="note">Para pagar una tarjeta, toca la tarjeta y luego <b>Pagar esta tarjeta</b>, o usa <b>Transferir</b>. El pago baja tu cuenta de cheques y tu deuda al mismo tiempo, sin contarse como gasto otra vez.</p>`;
+    html += `<p class="note">Toca una cuenta para ver sus movimientos. Para cambiar su nombre, fechas o pago automático, entra y toca <b>Editar</b>. Para pagar una tarjeta, entra y toca <b>Pagar</b>, o usa <b>Transferir</b>. La lupa busca en los movimientos de todas tus cuentas. El pago baja tu cuenta de cheques y tu deuda al mismo tiempo, sin contarse como gasto otra vez.</p>`;
     return html;
   }
   function filaCuenta(c, v) {
@@ -1701,9 +1743,9 @@
     if (c.tipo === 'tarjeta') {
       const deuda = Math.max(0, -v), uso = c.limite > 0 ? deuda / c.limite : 0;
       const col = uso > 0.7 ? 'red' : uso > 0.3 ? 'orange' : 'green';
-      return `<button class="row" type="button" data-act="editar-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt" style="gap:5px"><span class="t1">${esc(c.nombre)}</span><span class="t2">${c.limite > 0 ? `Usas ${Math.round(uso * 100)}% de ${money(c.limite)}` : 'Tarjeta de crédito'}${pendTxt}</span>${c.limite > 0 ? `<span class="bar" style="--c:var(--c-${col})"><i style="width:${Math.min(100, uso * 100).toFixed(1)}%"></i></span>` : ''}${(() => { const e = estadoTarjeta(c); if (!e) return ''; const t = textoTarjeta(e); return `<span class="t2 ${t.c === 'neg' ? 'neg' : t.c === 'pos' ? 'pos' : ''}" style="white-space:normal${t.c === 'warn' ? ';color:var(--c-orange);font-weight:600' : ''}">${esc(t.t)}</span>`; })()}</span><span class="amt ${deuda > 0.005 ? 'neg' : ''}">${v > 0.005 ? money(v) : moneyAbs(deuda)}<small>${v > 0.005 ? 'a favor' : c.diaPago ? 'deuda total' : 'por pagar'}</small></span></button>`;
+      return `<button class="row" type="button" data-act="abrir-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt" style="gap:5px"><span class="t1">${esc(c.nombre)}</span><span class="t2">${c.limite > 0 ? `Usas ${Math.round(uso * 100)}% de ${money(c.limite)}` : 'Tarjeta de crédito'}${pendTxt}</span>${c.limite > 0 ? `<span class="bar" style="--c:var(--c-${col})"><i style="width:${Math.min(100, uso * 100).toFixed(1)}%"></i></span>` : ''}${(() => { const e = estadoTarjeta(c); if (!e) return ''; const t = textoTarjeta(e); return `<span class="t2 ${t.c === 'neg' ? 'neg' : t.c === 'pos' ? 'pos' : ''}" style="white-space:normal${t.c === 'warn' ? ';color:var(--c-orange);font-weight:600' : ''}">${esc(t.t)}</span>`; })()}</span><span class="amt ${deuda > 0.005 ? 'neg' : ''}">${v > 0.005 ? money(v) : moneyAbs(deuda)}<small>${v > 0.005 ? 'a favor' : c.diaPago ? 'deuda total' : 'por pagar'}</small></span></button>`;
     }
-    return `<button class="row" type="button" data-act="editar-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2">${t.n}${pendTxt}</span></span><span class="amt ${v < -0.005 ? 'neg' : ''}">${money(v)}</span></button>`;
+    return `<button class="row" type="button" data-act="abrir-cuenta" data-id="${c.id}">${icCuenta(c)}<span class="rt"><span class="t1">${esc(c.nombre)}</span><span class="t2">${t.n}${pendTxt}</span></span><span class="amt ${v < -0.005 ? 'neg' : ''}">${money(v)}</span></button>`;
   }
 
   // ================= Vista: Préstamos =================
@@ -1778,20 +1820,23 @@
   const VISTAS = { inicio: ['Resumen', vInicio], movimientos: ['Movimientos', vMovimientos], presupuesto: ['Presupuesto', vPresupuesto], cuentas: ['Cuentas', vCuentas], prestamos: ['Préstamos', vPrestamos] };
   let vista = 'inicio';
   function pintarNav() {
-    $('#nav-tab').innerHTML = Object.entries(VISTAS).map(([k, [n]]) => `<button class="tab ${vista === k ? 'on' : ''}" type="button" data-act="tab" data-v="${k}" ${vista === k ? 'aria-current="page"' : ''}>${IC[k]}<span>${n}</span>${k === 'inicio' ? '<span class="dot" data-dot hidden></span>' : ''}</button>`).join('');
-    $('#nav-side').innerHTML = Object.entries(VISTAS).map(([k, [n]]) => `<button class="nav-i ${vista === k ? 'on' : ''}" type="button" data-act="tab" data-v="${k}" ${vista === k ? 'aria-current="page"' : ''}>${IC[k]}<span>${n}</span></button>`).join('');
+    const enTab = (k) => vista === k || (k === 'cuentas' && vista === 'movimientos');
+    $('#nav-tab').innerHTML = Object.entries(VISTAS).filter(([k]) => k !== 'movimientos').map(([k, [n]]) => `<button class="tab ${enTab(k) ? 'on' : ''}" type="button" data-act="tab" data-v="${k}" ${enTab(k) ? 'aria-current="page"' : ''}>${IC[k]}<span>${n}</span>${k === 'inicio' ? '<span class="dot" data-dot hidden></span>' : ''}</button>`).join('');
+    $('#nav-side').innerHTML = Object.entries(VISTAS).filter(([k]) => k !== 'movimientos').map(([k, [n]]) => `<button class="nav-i ${enTab(k) ? 'on' : ''}" type="button" data-act="tab" data-v="${k}" ${enTab(k) ? 'aria-current="page"' : ''}>${IC[k]}<span>${n}</span></button>`).join('');
     $('#side-ajustes').innerHTML = `${IC.ajustes}<span>Ajustes y copia</span><span class="dot" data-dot hidden></span>`;
   }
   function render() {
     pintarNav();
     $('#view').innerHTML = VISTAS[vista][1]();
     if (vista === 'movimientos') montarMovimientos();
+    if (vista === 'cuentas' && cuentaAbierta && $('#mov-lista')) montarCuentaDet();
     if (vista === 'prestamos' && prestAbierto) montarDetalle();
     estadoCopia();
   }
   function ir(v) {
     if (!VISTAS[v]) v = 'inicio';
     if (v === 'prestamos' && vista !== 'prestamos') prestAbierto = null;
+    if (v === 'cuentas') { if (cuentaAbierta) { cuentaAbierta = null; filtro.cuenta = ''; filtro.q = ''; filtro.estado = ''; } }
     vista = v;
     try { if (location.hash.slice(1) !== v) history.replaceState(null, '', '#' + v); } catch (e) {}
     render(); window.scrollTo(0, 0);
@@ -1931,7 +1976,7 @@
       if (x) S.movimientos[S.movimientos.indexOf(x)] = nuevo; else S.movimientos.push(nuevo);
       guardar(); cerrarSheet(); toast(x ? 'Movimiento actualizado' : rep ? `Guardado y programado: ${FRECS[rep][0].toLowerCase()}` : 'Movimiento guardado');
       if (rep) procesarRecurrentes();
-      if (vista === 'movimientos' && fecha.slice(0, 7) !== mesMov && !x) mesMov = fecha.slice(0, 7);
+      if ((vista === 'movimientos' || (vista === 'cuentas' && cuentaAbierta)) && fecha.slice(0, 7) !== mesMov && !x) mesMov = fecha.slice(0, 7);
       render();
     });
     if (x) $('#m-borrar', b).addEventListener('click', async () => {
@@ -2077,7 +2122,7 @@
       <p class="form-error" id="a-error" role="alert"></p>
       ${esRet && c.historial.length ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Últimas actualizaciones</p><div class="group">${c.historial.slice(-6).reverse().map((h, i, arr) => { const prev = arr[i + 1]; const d = prev ? h.v - prev.v : 0; return `<div class="row plain" style="cursor:default; min-height:48px"><span class="rt"><span class="t1">${esc(cap(parseISO(h.f).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })))}</span></span><span class="amt">${money(h.v)}${prev && Math.abs(d) > 0.005 ? `<small class="${d > 0 ? 'pos' : 'neg'}">${d > 0 ? '+' : '−'}${moneyAbs(d)}</small>` : ''}</span></div>`; }).join('')}</div></div>` : ''}
       ${esRet ? '<div class="sheet-actions"><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>' : ''}
-      ${c && !esRet ? `<div class="sheet-actions">${S.cuentas.filter((x) => x.tipo !== 'retiro').length > 1 ? (c.tipo === 'tarjeta' ? (() => { const e = estadoTarjeta(c); return `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e && e.porPagar > 0.005 ? e.porPagar.toFixed(2) : ''}">Pagar esta tarjeta${e && e.porPagar > 0.005 ? ' · ' + money(e.porPagar) : ''}</button>`; })() : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
+      ${c && !esRet ? `<div class="sheet-actions">${S.cuentas.filter((x) => x.tipo !== 'retiro').length > 1 ? (c.tipo === 'tarjeta' ? (() => { const e = estadoTarjeta(c); return `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e && e.porPagar > 0.005 ? e.porPagar.toFixed(2) : ''}">Pagar esta tarjeta${e && e.porPagar > 0.005 ? ' · ' + money(e.porPagar) : ''}</button>`; })() : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}${vista === 'cuentas' && cuentaAbierta === c.id ? '' : '<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button>'}<button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
     </div></form>`);
     const pintar = () => {
       const esT = $('#a-tipo', b).value === 'tarjeta', esR = $('#a-tipo', b).value === 'retiro';
@@ -2112,7 +2157,7 @@
       guardar(); cerrarSheet(); toast(c ? (tipo === 'retiro' ? 'Saldo actualizado' : 'Cuenta actualizada') : 'Cuenta agregada'); procesarRecurrentes(); render();
     });
     if (c) {
-      if ($('#a-ver', b)) $('#a-ver', b).addEventListener('click', () => { filtro.cuenta = c.id; filtro.cat = ''; filtro.q = ''; cerrarSheet(); ir('movimientos'); });
+      if ($('#a-ver', b)) $('#a-ver', b).addEventListener('click', () => abrirCuenta(c.id));
       $('#a-borrar', b).addEventListener('click', async () => {
         const n = S.movimientos.filter((m) => m.cuentaId === c.id || m.cuentaDestinoId === c.id).length;
         if (!(await confirmar('¿Eliminar cuenta?', n ? `También se borrarán sus ${n} movimientos.` : 'La cuenta no tiene movimientos.'))) return;
@@ -2754,7 +2799,10 @@
     'limpiar-filtros': () => { filtro.cuenta = ''; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; render(); },
     'desglose': (t) => sheetDesglose(t.dataset.k, { ym: t.dataset.ym, g: t.dataset.g, id: t.dataset.id }),
     'ir-prest': (t) => { cerrarSheet(); ir('prestamos'); prestAbierto = t.dataset.id; render(); window.scrollTo(0, 0); },
-    'ver-mov-cuenta': (t) => { cerrarSheet(); filtro.cuenta = t.dataset.id; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; ir('movimientos'); window.scrollTo(0, 0); },
+    'ver-mov-cuenta': (t) => abrirCuenta(t.dataset.id),
+    'abrir-cuenta': (t) => abrirCuenta(t.dataset.id),
+    'cuenta-volver': () => { cuentaAbierta = null; filtro.cuenta = ''; filtro.q = ''; filtro.estado = ''; render(); window.scrollTo(0, 0); },
+    'todos-mov': (t) => { cerrarSheet(); cuentaAbierta = null; filtro.cuenta = ''; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; mesMov = ymHoy(); ir('movimientos'); if (t.dataset.foco) setTimeout(() => { const q = $("#f-q"); if (q && vista === "movimientos") q.focus(); }, 60); },
     'programados': () => sheetProgramados(), 'nuevo-rec': () => sheetRec(null), 'editar-rec': (t) => sheetRec(t.dataset.id),
     'rec-confirmar': (t) => { const r = S.recurrentes.find((x) => x.id === t.dataset.id); if (!r) return; S.movimientos.push(movDeRec(r, t.dataset.f)); r.hasta = t.dataset.f; guardar(); render(); toast('Movimiento registrado'); },
     'rec-saltar': (t) => { const r = S.recurrentes.find((x) => x.id === t.dataset.id); if (!r) return; r.hasta = t.dataset.f; guardar(); render(); toast('Se saltó esta vez'); },
@@ -2863,7 +2911,7 @@
   document.addEventListener('click', (e) => { const h = e.target.closest('[data-pat]'); if (h) selPatrimonio(h); });
   document.addEventListener('keydown', (e) => { if (e.key !== 'Enter' && e.key !== ' ') return; const h = e.target.closest && e.target.closest('[data-pat]'); if (h) { e.preventDefault(); selPatrimonio(h); } });
   document.addEventListener('change', (e) => { if (e.target.matches && e.target.matches('input.abono')) guardarAbono(e.target, true); });
-  window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VISTAS[v] && v !== vista) { vista = v; prestAbierto = null; render(); } });
+  window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VISTAS[v] && v !== vista) { vista = v; prestAbierto = null; cuentaAbierta = null; render(); } });
 
   // Sin zoom: evita el pellizco y el doble toque en iPhone/iPad
   ['gesturestart', 'gesturechange', 'gestureend'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
