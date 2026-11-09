@@ -774,7 +774,19 @@
       cadena = cadena.then(() => escribir('estado', snap)).catch(() => toast('No se pudo guardar el cambio. Inténtalo otra vez.'));
     }
   }
-  function guardar() { persistir(); lsSet('ultimo_cambio', Date.now()); estadoCopia(); }
+  function guardar() { persistir(); lsSet('ultimo_cambio', Date.now()); estadoCopia(); copiaAuto(); }
+  // ----- App de iPhone (Xcode): puente para guardar archivos y copia automática -----
+  const nativo = (() => { try { return window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.misFinanzas || null; } catch (e) { return null; } })();
+  function aB64(datos) { const u = typeof datos === 'string' ? new TextEncoder().encode(datos) : datos; let out = ''; for (let i = 0; i < u.length; i += 0x8000) out += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(out); }
+  const esperasN = {}; let nEsperaN = 0;
+  window.__mfRespuesta = (id, ok) => { const r = esperasN[id]; delete esperasN[id]; if (r) r(!!ok); };
+  const nativoGuardar = (accion, nombre, datos, mime) => new Promise((res) => { const id = ++nEsperaN; esperasN[id] = res; nativo.postMessage({ id, accion, nombre, mime, b64: aB64(datos) }); });
+  let tAuto = null;
+  function copiaAuto() {
+    if (!nativo) return;
+    clearTimeout(tAuto);
+    tAuto = setTimeout(async () => { try { if (sesion.bloqueada || !hayDatos()) return; const t = await armarCopia(); if (t) await nativoGuardar('auto', 'Copia automática.json', t, 'application/json'); } catch (e) {} }, 3000);
+  }
 
   function idb() { return new Promise((res, rej) => { const r = indexedDB.open('mis-finanzas', 1); r.onupgradeneeded = () => r.result.createObjectStore('k'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
   async function idbOp(modo, fn) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction('k', modo); const r = fn(t.objectStore('k')); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); }
@@ -2355,6 +2367,7 @@
     return '﻿' + filas.map((r) => r.map(q).join(',')).join('\r\n');
   }
   async function bajarArchivo(nombre, texto, mime) {
+    if (nativo) { try { if (await nativoGuardar('compartir', nombre, texto, mime)) toast('Archivo guardado'); } catch (e) { toast('No se pudo guardar el archivo.'); } return; }
     let dl = null; try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) {}
     if (dl) { try { await dl.save({ filename: nombre, data: texto }); toast('Archivo guardado'); } catch (e) { if (!(e && e.code === 'declined')) toast('No se pudo guardar el archivo.'); } return; }
     const tactil = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
@@ -2532,7 +2545,7 @@
       <div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Copias automáticas</p><div class="group">
         <div class="frow"><label for="z-rec">Recordarme</label><select id="z-rec">${[[1, 'Cada día'], [7, 'Cada semana'], [14, 'Cada 2 semanas'], [30, 'Cada mes'], [0, 'Nunca']].map(([v, n]) => `<option value="${v}" ${S.config.recordatorioDias === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
         <button class="row plain" type="button" id="z-snaps"><span class="rt"><span class="t1">Copias en este dispositivo</span><span class="t2">Una por cada día que abres la app · últimas ${MAX_SNAPS}</span></span><span class="amt" style="color:var(--tint)">Ver</span></button>
-      </div><p class="note">Apple no deja que una página web guarde archivos sola en iCloud, así que la app te avisa en Resumen cuando toca guardar tu copia y lo haces con un toque.</p></div>
+      </div><p class="note">${nativo ? 'Además, cada vez que haces un cambio la app guarda sola una copia en <b>Archivos › En mi iPhone › Mis Finanzas</b> («Copia automática.json»). Esa copia vive en tu iPhone; para no perder nada si cambias o pierdes el teléfono, guarda también tu copia en iCloud Drive cuando la app te avise.' : 'Apple no deja que una página web guarde archivos sola en iCloud, así que la app te avisa en Resumen cuando toca guardar tu copia y lo haces con un toque.'}</p></div>
       ${cifradoOk ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Seguridad</p><div class="group">
         <div class="frow"><label for="z-lock" class="lbl-w">Bloquear con código</label><input id="z-lock" class="switch" type="checkbox" ${lk ? 'checked' : ''}></div>
         ${lk && bioOk ? `<div class="frow"><label for="z-bio" class="lbl-w">Usar Face ID o Touch ID</label><input id="z-bio" class="switch" type="checkbox" ${lk.bio ? 'checked' : ''}></div>` : ''}
@@ -2705,21 +2718,26 @@
   }
 
   // ================= Copia de seguridad =================
-  async function guardarCopia() {
-    if (!hayDatos()) { toast('Todavía no hay datos para guardar.'); return; }
-    let texto;
+  async function armarCopia() {
     const { claveCopia, ...cfg } = S.config;
     const datosCopia = { ...S, config: cfg };
     if (cifradoOk) {
-      if (!claveCopia) { sheetClaveCopia(true); return; }
-      try {
-        const k = await llaveCopia();
-        const c = await cifrar(k.key, datosCopia);
-        texto = JSON.stringify({ app: 'mis-finanzas', version: 4, fecha: new Date().toISOString(), cifrado: { alg: 'AES-GCM', kdf: 'PBKDF2-SHA256', iter: ITER_COPIA, salt: b64(k.salt), iv: c.iv }, datos: c.ct });
-      } catch (e) { toast('No se pudo cifrar la copia.'); return; }
-    } else texto = JSON.stringify({ app: 'mis-finanzas', version: 3, fecha: new Date().toISOString(), datos: datosCopia }, null, 2);
+      if (!claveCopia) return null;
+      const k = await llaveCopia();
+      const c = await cifrar(k.key, datosCopia);
+      return JSON.stringify({ app: 'mis-finanzas', version: 4, fecha: new Date().toISOString(), cifrado: { alg: 'AES-GCM', kdf: 'PBKDF2-SHA256', iter: ITER_COPIA, salt: b64(k.salt), iv: c.iv }, datos: c.ct });
+    }
+    return JSON.stringify({ app: 'mis-finanzas', version: 3, fecha: new Date().toISOString(), datos: datosCopia }, null, 2);
+  }
+  async function guardarCopia() {
+    if (!hayDatos()) { toast('Todavía no hay datos para guardar.'); return; }
+    if (cifradoOk && !S.config.claveCopia) { sheetClaveCopia(true); return; }
+    let texto;
+    try { texto = await armarCopia(); } catch (e) { toast('No se pudo cifrar la copia.'); return; }
+    if (!texto) { toast('No se pudo crear la copia.'); return; }
     const nombre = 'mis-finanzas.json';
     const listo = () => { lsSet('ultima_copia', Date.now()); estadoCopia(); if (!$('#sheet').hidden && $('#sheet-box .sheet-head h2') && $('#sheet-box .sheet-head h2').textContent === 'Ajustes y copia') sheetAjustes(); toast('Copia guardada'); };
+    if (nativo) { try { if (await nativoGuardar('compartir', nombre, texto, 'application/json')) listo(); } catch (e) { toast('No se pudo guardar la copia.'); } return; }
     let dl = null;
     try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) {}
     if (dl) {
