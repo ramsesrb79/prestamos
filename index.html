@@ -455,11 +455,19 @@
   const parseISO = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d || 1); };
   const addMes = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + pad(d.getMonth() + 1); };
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const fechaTxt = (d, o) => {
+    // Fechas siempre mes / día / año
+    if (!o || !o.month || o.month === '2-digit' || o.month === 'numeric') return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + '/' + d.getFullYear();
+    let mes = d.toLocaleDateString('es-MX', { month: o.month }).replace('.', '');
+    let s = (o.weekday ? mes : cap(mes)) + (o.day ? ' ' + d.getDate() : '') + (o.year ? (o.day ? ', ' : ' ') + d.getFullYear() : '');
+    if (o.weekday) s = d.toLocaleDateString('es-MX', { weekday: o.weekday }) + ', ' + s;
+    return s;
+  };
   const nombreMes = (ym) => cap(parseISO(ym + '-01').toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }));
   const mesCorto = (ym) => cap(parseISO(ym + '-01').toLocaleDateString('es-MX', { month: 'short' }).replace('.', ''));
-  const fFecha = (d) => d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+  const fFecha = (d) => fechaTxt(d, { day: '2-digit', month: 'short', year: 'numeric' });
   const fMes = (d) => d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
-  const fDia = (s) => { if (s === hoyISO()) return 'Hoy'; const ay = new Date(); ay.setDate(ay.getDate() - 1); if (s === isoDe(ay)) return 'Ayer'; return cap(parseISO(s).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })); };
+  const fDia = (s) => { if (s === hoyISO()) return 'Hoy'; const ay = new Date(); ay.setDate(ay.getDate() - 1); if (s === isoDe(ay)) return 'Ayer'; return cap(fechaTxt(parseISO(s), { weekday: 'long', day: 'numeric', month: 'long' })); };
   const diasDelMes = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); };
   const nuevoId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const slug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -1081,7 +1089,7 @@
     S.recurrentes.forEach((r) => { if (r.tipo === 'gasto' && r.categoriaId !== CAT_PREST) t += r.monto * proximas(r, fin, 40).length; });
     return t;
   }
-  const fCorta = (f) => parseISO(f).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }).replace('.', '');
+  const fCorta = (f) => fechaTxt(parseISO(f), { day: 'numeric', month: 'short' }).replace('.', '');
   function cuandoTxt(f) { const d = Math.round((parseISO(f) - parseISO(hoyISO())) / 864e5); return d === 0 ? 'Hoy' : d === 1 ? 'Mañana' : d < 0 ? `Tocaba el ${fCorta(f)}` : `${fCorta(f)} · en ${d} días`; }
   function partesRec(r) {
     const c = cat(r.categoriaId), cu = cuenta(r.cuentaId), de = cuenta(r.cuentaDestinoId);
@@ -1500,7 +1508,7 @@
   function vInicio() {
     const ym = ymHoy(), d = disponible(ym), sal = saldos(), pat = patrimonio(sal);
     const hoy = new Date(), diasRest = diasDelMes(ym) - hoy.getDate() + 1;
-    const fechaLarga = cap(hoy.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }));
+    const fechaLarga = cap(fechaTxt(hoy, { weekday: 'long', day: 'numeric', month: 'long' }));
     const acciones = `<button class="icon-btn" type="button" data-act="ajustes" aria-label="Ajustes y copia">${IC.ajustes}<span class="dot" data-dot hidden></span></button>${btnMas('nuevo-mov', 'Nuevo movimiento')}`;
     let html = encabezado('Resumen', fechaLarga, acciones);
     const rc = recordatorioCopia();
@@ -2133,7 +2141,7 @@
       </div>
       <p class="note" id="a-hint"></p>
       <p class="form-error" id="a-error" role="alert"></p>
-      ${esRet && c.historial.length ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Últimas actualizaciones</p><div class="group">${c.historial.slice(-6).reverse().map((h, i, arr) => { const prev = arr[i + 1]; const d = prev ? h.v - prev.v : 0; return `<div class="row plain" style="cursor:default; min-height:48px"><span class="rt"><span class="t1">${esc(cap(parseISO(h.f).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })))}</span></span><span class="amt">${money(h.v)}${prev && Math.abs(d) > 0.005 ? `<small class="${d > 0 ? 'pos' : 'neg'}">${d > 0 ? '+' : '−'}${moneyAbs(d)}</small>` : ''}</span></div>`; }).join('')}</div></div>` : ''}
+      ${esRet && c.historial.length ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Últimas actualizaciones</p><div class="group">${c.historial.slice(-6).reverse().map((h, i, arr) => { const prev = arr[i + 1]; const d = prev ? h.v - prev.v : 0; return `<div class="row plain" style="cursor:default; min-height:48px"><span class="rt"><span class="t1">${esc(cap(fechaTxt(parseISO(h.f), { day: 'numeric', month: 'long', year: 'numeric' })))}</span></span><span class="amt">${money(h.v)}${prev && Math.abs(d) > 0.005 ? `<small class="${d > 0 ? 'pos' : 'neg'}">${d > 0 ? '+' : '−'}${moneyAbs(d)}</small>` : ''}</span></div>`; }).join('')}</div></div>` : ''}
       ${esRet ? '<div class="sheet-actions"><button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>' : ''}
       ${c && !esRet ? `<div class="sheet-actions">${S.cuentas.filter((x) => x.tipo !== 'retiro').length > 1 ? (c.tipo === 'tarjeta' ? (() => { const e = estadoTarjeta(c); return `<button class="btn block" type="button" data-act="transferir" data-hacia="${c.id}" data-monto="${e && e.porPagar > 0.005 ? e.porPagar.toFixed(2) : ''}">Pagar esta tarjeta${e && e.porPagar > 0.005 ? ' · ' + money(e.porPagar) : ''}</button>`; })() : `<button class="btn block" type="button" data-act="transferir" data-desde="${c.id}">Transferir desde esta cuenta</button>`) : ''}${vista === 'cuentas' && cuentaAbierta === c.id ? '' : '<button class="btn block tinted" type="button" id="a-ver">Ver movimientos de esta cuenta</button>'}<button class="btn block destructive" type="button" id="a-borrar">Eliminar cuenta</button></div>` : ''}
     </div></form>`);
@@ -2301,14 +2309,14 @@
     const cambio = lsGet('ultimo_cambio') || 0, copia = lsGet('ultima_copia') || 0;
     if (!copia) return { ok: false, t: 'Aún no guardas una copia' };
     if (cambio > copia) return { ok: false, t: 'Tienes cambios sin guardar en tu copia' };
-    return { ok: true, t: 'Copia al día · ' + new Date(copia).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) };
+    return { ok: true, t: 'Copia al día · ' + fechaTxt(new Date(copia), { day: 'numeric', month: 'short' }) };
   }
   function hayDatos() { return S.cuentas.length || S.movimientos.length || S.prestamos.length || S.metas.length || S.recurrentes.length || S.config.ingresoMensual; }
   function estadoCopia() { const c = textoCopia(); document.querySelectorAll('[data-dot]').forEach((d) => { d.hidden = c.ok || !hayDatos(); }); }
   // ================= Reporte / Estado de cuenta =================
   let repTipo = 'mes', repPer = ymHoy();
   const TIPO_MOV_R = { gasto: 'Gasto', ingreso: 'Ingreso', devolucion: 'Devolución', transferencia: 'Transferencia' };
-  const fRep = (f) => parseISO(f).toLocaleDateString('es-MX');
+  const fRep = (f) => fechaTxt(parseISO(f));
   function descReporte(x, cid) {
     if (x.nota) return x.nota;
     if (x.tipo === 'transferencia') { const otra = x.cuentaId === cid ? cuenta(x.cuentaDestinoId) : cuenta(x.cuentaId); return (x.cuentaId === cid ? 'Transferencia a ' : 'Transferencia de ') + (otra ? otra.nombre : '—'); }
@@ -2364,7 +2372,7 @@
   function reporteCSV(d) {
     const q = (v) => '"' + String(v).replace(/"/g, '""') + '"';
     const filas = [['Fecha', 'Cuenta', 'Descripción', 'Categoría', 'Monto', 'Saldo']];
-    d.cuentas.forEach((a) => { a.movs.forEach((m) => filas.push([m.fecha, a.c.nombre, m.desc, m.cat || '', m.monto === null ? '' : m.monto.toFixed(2), m.saldo.toFixed(2)])); });
+    d.cuentas.forEach((a) => { a.movs.forEach((m) => filas.push([fRep(m.fecha), a.c.nombre, m.desc, m.cat || '', m.monto === null ? '' : m.monto.toFixed(2), m.saldo.toFixed(2)])); });
     return '﻿' + filas.map((r) => r.map(q).join(',')).join('\r\n');
   }
   async function bajarArchivo(nombre, texto, mime) {
@@ -2575,7 +2583,7 @@
     if (!ks.length) { el.innerHTML = '<div class="row plain"><span class="rt"><span class="t1">Todavía no hay copias</span><span class="t2">Se crea la primera la próxima vez que abras la app con datos.</span></span></div>'; return; }
     const items = [];
     for (const k of ks) { try { items.push({ k, v: await idbGet(k) }); } catch (e) {} }
-    el.innerHTML = items.map(({ k, v }) => `<div class="row plain" style="cursor:default"><span class="rt"><span class="t1">${esc(cap(parseISO(k.slice(5)).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })))}</span><span class="t2">${esc(v && v.resumen || '')}</span></span><button class="btn small tinted" type="button" data-snap="${esc(k)}">Restaurar</button></div>`).join('');
+    el.innerHTML = items.map(({ k, v }) => `<div class="row plain" style="cursor:default"><span class="rt"><span class="t1">${esc(cap(fechaTxt(parseISO(k.slice(5)), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })))}</span><span class="t2">${esc(v && v.resumen || '')}</span></span><button class="btn small tinted" type="button" data-snap="${esc(k)}">Restaurar</button></div>`).join('');
     el.addEventListener('click', async (e) => {
       const bt = e.target.closest('[data-snap]'); if (!bt) return;
       if (!(await confirmar('¿Restaurar esta copia?', 'Tus datos regresan a como estaban ese día. Lo que registraste después se pierde, salvo que tengas otra copia.', 'Restaurar'))) return;
@@ -2656,7 +2664,7 @@
     $('#vc-back', b).addEventListener('click', () => sheetAjustes());
   }
   function sheetPedirClave(probar, alAbrir, fecha) {
-    const cuando = fecha && !isNaN(new Date(fecha)) ? ` del ${new Date(fecha).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}` : '';
+    const cuando = fecha && !isNaN(new Date(fecha)) ? ` del ${fechaTxt(new Date(fecha), { day: 'numeric', month: 'long', year: 'numeric' })}` : '';
     const b = abrirSheet(`<form id="form-abrir" novalidate>${cabeza('Abrir copia cifrada')}<div style="display:grid; gap:14px">
       <p class="note" style="margin:0">Escribe la contraseña con la que guardaste esta copia${cuando}.</p>
       ${campoClave('o-pass', 'Contraseña de la copia', true)}
