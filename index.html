@@ -1915,6 +1915,7 @@
       b.querySelectorAll('.seg button').forEach((bt) => bt.classList.toggle('on', bt.dataset.tipo === tipo));
       $('#row-dest', b).hidden = tipo !== 'transferencia';
       $('#row-cat', b).hidden = tipo === 'transferencia';
+      $('#m-nota', b).placeholder = tipo === 'ingreso' ? '¿De dónde viene este dinero?' : tipo === 'transferencia' ? 'Opcional: para qué es' : tipo === 'devolucion' ? '¿Qué te regresaron?' : '¿En qué lo gastaste?';
       $('#l-cuenta', b).textContent = tipo === 'transferencia' ? 'Desde' : tipo === 'ingreso' ? 'A la cuenta' : tipo === 'devolucion' ? 'Regresa a' : 'Pagado con';
       const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto';
       const sel = forzar || (x && x.tipo === tipo ? x.categoriaId : $('#m-cat', b).value);
