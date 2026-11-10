@@ -2388,7 +2388,7 @@
   function anchoPDF(str, size) { let w = 0; for (const ch of str) w += (PDF_W[ch] != null ? PDF_W[ch] : (ch >= 'A' && ch <= 'Z' ? 700 : 556)); return w / 1000 * size; }
   function latin1(str) {
     let out = '';
-    for (let ch of String(str).replace(/−/g, '-').replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/…/g, '...').replace(/—/g, '-')) { const c = ch.charCodeAt(0); out += c <= 255 ? ch : '?'; }
+    for (let ch of String(str).replace(/−/g, '-').replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/…/g, '...').replace(/[—–‒―]/g, '-').replace(/[›»]/g, '>').replace(/[‹«]/g, '<').replace(/•/g, '·').replace(/＋/g, '+').replace(/[\u00a0\u202f]/g, ' ')) { const c = ch.charCodeAt(0); out += c <= 255 ? ch : '?'; }
     return out.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
   }
   function fitPDF(str, maxW, size) { str = String(str); if (anchoPDF(str, size) <= maxW) return str; let s = str; while (s.length > 1 && anchoPDF(s + '...', size) > maxW) s = s.slice(0, -1); return s + '...'; }
