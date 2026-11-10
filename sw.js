@@ -1,5 +1,5 @@
 // Guarda la app en el dispositivo para que funcione sin internet.
-const VERSION = 'finanzas-v2';
+const VERSION = 'finanzas-v3';
 const ARCHIVOS = ['./', './index.html', './manifest.webmanifest', './icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png', './icons/favicon.png'];
 
 self.addEventListener('install', (e) => {
@@ -12,9 +12,9 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // La página: primero internet (para recibir mejoras), si no hay, la copia guardada
+  // La página: siempre la versión más nueva de internet (sin usar la memoria del navegador); si no hay internet, la copia guardada
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).then((r) => { const copia = r.clone(); caches.open(VERSION).then((c) => c.put('./index.html', copia)); return r; })
+    e.respondWith(fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then((r) => { const copia = r.clone(); caches.open(VERSION).then((c) => c.put('./index.html', copia)); return r; })
       .catch(() => caches.match('./index.html')));
     return;
   }
