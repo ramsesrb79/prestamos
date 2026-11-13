@@ -356,6 +356,9 @@
   .colors label:has(input:focus-visible) { outline: 3px solid var(--tint); outline-offset: 4px; }
   .form-error { color: var(--neg); font-size: 15px; min-height: 1px; text-align: center; }
   .sug { display: grid; border-top: .5px solid var(--sep); }
+  .div-row select { text-align: left; text-align-last: left; color: var(--label); padding-left: 0; }
+  .div-row .d-monto { text-align: right; }
+  .div-row .d-x { width: 22px; padding: 0; flex: none; }
   .sug-i { display: flex; gap: 12px; align-items: center; width: 100%; padding: 8px 16px; background: none; border: 0; text-align: left; cursor: pointer; color: var(--label); font: inherit; }
   .sug-i + .sug-i { border-top: .5px solid var(--sep); }
   .sug-i:active, .sug-i:hover { background: var(--fill); }
@@ -707,7 +710,7 @@
     const catIds = new Set(out.categorias.map((c) => c.id));
     out.movimientos = (Array.isArray(s.movimientos) ? s.movimientos : []).filter((m) => m && m.id && ids.has(m.cuentaId)).map((m) => {
       const tipo = ['gasto', 'ingreso', 'transferencia', 'devolucion'].includes(m.tipo) ? m.tipo : 'gasto';
-      return { id: String(m.id), tipo, monto: Math.abs(num(m.monto)), cuentaId: m.cuentaId, cuentaDestinoId: tipo === 'transferencia' && ids.has(m.cuentaDestinoId) ? m.cuentaDestinoId : null, categoriaId: tipo === 'transferencia' || !catIds.has(m.categoriaId) ? null : m.categoriaId, fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : hoyISO(), nota: String(m.nota || ''), posteado: !!m.posteado, recurrenteId: m.recurrenteId ? String(m.recurrenteId) : null, autopagoDe: m.autopagoDe ? String(m.autopagoDe) : null, creado: m.creado || new Date().toISOString() };
+      return { id: String(m.id), tipo, monto: Math.abs(num(m.monto)), cuentaId: m.cuentaId, cuentaDestinoId: tipo === 'transferencia' && ids.has(m.cuentaDestinoId) ? m.cuentaDestinoId : null, categoriaId: tipo === 'transferencia' || !catIds.has(m.categoriaId) ? null : m.categoriaId, partes: tipo === 'transferencia' ? null : limpiarPartes(m.partes, Math.abs(num(m.monto)), catIds), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : hoyISO(), nota: String(m.nota || ''), posteado: !!m.posteado, recurrenteId: m.recurrenteId ? String(m.recurrenteId) : null, autopagoDe: m.autopagoDe ? String(m.autopagoDe) : null, creado: m.creado || new Date().toISOString() };
     }).filter((m) => m.tipo !== 'transferencia' || m.cuentaDestinoId);
     out.metas = (Array.isArray(s.metas) ? s.metas : []).filter((m) => m && m.id).map((m) => ({ id: String(m.id), nombre: String(m.nombre || 'Meta'), objetivo: Math.max(0, num(m.objetivo)), ahorrado: Math.max(0, num(m.ahorrado)), fecha: /^\d{4}-\d{2}-\d{2}$/.test(m.fecha || '') ? m.fecha : '', color: PALETA.includes(m.color) ? m.color : 'green' }));
     out.prestamos = (Array.isArray(s.prestamos) ? s.prestamos : []).map(normalizarPrestamo);
@@ -782,7 +785,7 @@
       cadena = cadena.then(() => escribir('estado', snap)).catch(() => toast('No se pudo guardar el cambio. Inténtalo otra vez.'));
     }
   }
-  function guardar() { persistir(); lsSet('ultimo_cambio', Date.now()); estadoCopia(); copiaAuto(); }
+  function guardar() { persistir(); lsSet('ultimo_cambio', Date.now()); estadoCopia(); copiaAuto(); programarAvisos(); }
   // ----- App de iPhone (Xcode): puente para guardar archivos y copia automática -----
   const nativo = (() => { try { return window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.misFinanzas || null; } catch (e) { return null; } })();
   function aB64(datos) { const u = typeof datos === 'string' ? new TextEncoder().encode(datos) : datos; let out = ''; for (let i = 0; i < u.length; i += 0x8000) out += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(out); }
@@ -948,6 +951,7 @@
   }
   async function intentarBio(pad) { pad.espera('Usando Face ID…'); const ok = await abrirConBio(); if (!ok && sesion.bloqueada) pad.reset('Escribe tu código', false); }
   function desbloqueado(key, datos) {
+    setTimeout(() => programarAvisos(), 1500);
     sesion.key = key; sesion.bloqueada = false;
     S = normalizarEstado(datos); cacheAm.clear();
     lsSet('bloqueo_fallos', 0); lsDel('bloqueo_hasta');
@@ -993,13 +997,22 @@
     });
     return m;
   }
+  // Movimiento dividido en varias categorías: partes = [{ categoriaId, monto }] (2 o más, suman el total)
+  function limpiarPartes(ps, total, catIds) {
+    if (!Array.isArray(ps) || ps.length < 2) return null;
+    const out = ps.map((p) => ({ categoriaId: p && catIds.has(p.categoriaId) ? p.categoriaId : null, monto: Math.round(Math.abs(num(p && p.monto)) * 100) / 100 })).filter((p) => p.monto > 0);
+    const t = out.reduce((a, p) => a + p.monto, 0);
+    return out.length >= 2 && Math.abs(t - total) < 0.011 ? out : null;
+  }
+  const partesDe = (x) => (x.partes && x.partes.length >= 2 ? x.partes : [{ categoriaId: x.categoriaId, monto: x.monto }]);
+  const tieneCat = (x, id) => partesDe(x).some((p) => (id === '_g' || id === '_sin' ? !p.categoriaId : p.categoriaId === id));
+  const nombrePartes = (x) => partesDe(x).map((p) => { const c = cat(p.categoriaId); return c ? c.nombre : 'Sin categoría'; }).join(', ');
   function statsMes(ym) {
     let ing = 0, gas = 0; const porCat = {};
     S.movimientos.forEach((x) => {
       if (x.fecha.slice(0, 7) !== ym || x.tipo === 'transferencia') return;
-      const k = x.categoriaId || (x.tipo === 'ingreso' ? '_i' : '_g');
-      if (x.tipo === 'devolucion') { porCat[k] = (porCat[k] || 0) - x.monto; gas -= x.monto; return; }
-      porCat[k] = (porCat[k] || 0) + x.monto;
+      partesDe(x).forEach((p) => { const k = p.categoriaId || (x.tipo === 'ingreso' ? '_i' : '_g'); porCat[k] = (porCat[k] || 0) + (x.tipo === 'devolucion' ? -p.monto : p.monto); });
+      if (x.tipo === 'devolucion') { gas -= x.monto; return; }
       if (x.tipo === 'ingreso') ing += x.monto; else gas += x.monto;
     });
     return { ing, gas, porCat };
@@ -1329,8 +1342,10 @@
       const ing = x.tipo === 'ingreso' || x.tipo === 'devolucion';
       icono = icCat(c);
       titulo = x.nota || (x.tipo === 'devolucion' ? 'Devolución' : c ? c.nombre : 'Sin categoría');
-      sub = (x.tipo === 'devolucion' ? 'Devolución · ' : '') + (x.nota && c ? c.nombre + ' · ' : '') + (cu ? cu.nombre : '');
+      if (x.partes) { titulo = x.nota || 'Dividido'; sub = (x.tipo === 'devolucion' ? 'Devolución · ' : '') + 'Dividido: ' + nombrePartes(x) + ' · ' + (cu ? cu.nombre : ''); }
+      else sub = (x.tipo === 'devolucion' ? 'Devolución · ' : '') + (x.nota && c ? c.nombre + ' · ' : '') + (cu ? cu.nombre : '');
       amt = `<span class="amt ${ing ? 'pos' : ''}">${ing ? '+' : '−'}${moneyAbs(x.monto)}`;
+      if (x.partes && opt.parteDe) { const pm = partesDe(x).filter((p) => (opt.parteDe === '_g' ? !p.categoriaId : p.categoriaId === opt.parteDe)).reduce((a, p) => a + p.monto, 0); sub = `${moneyAbs(pm)} de ${moneyAbs(x.monto)} · ` + sub; }
     }
     if (opt.run != null) amt += `<small class="${opt.run < -0.005 ? 'neg' : ''}">${money(opt.run)}</small>`;
     amt += '</span>';
@@ -1381,6 +1396,62 @@
       return { titulo: NG[g], total: money(total), nota: 'Cada categoría cuenta con su límite, o con lo que ya gastaste si es más. Toca una para cambiar su límite.', cuerpo: grupoD(nombreMes(ym), filas, 'No hay categorías con límite o gastos aquí.') };
     }
     return null;
+  }
+  // ----- Suscripciones y cargos fijos: cargos que se repiten -----
+  const FREC_SUS = [['semanal', 'Cada semana', 7, 52], ['quincenal', 'Cada 2 semanas', 14, 26], ['mensual', 'Cada mes', 30.4, 12], ['bimestral', 'Cada 2 meses', 61, 6], ['trimestral', 'Cada 3 meses', 91, 4], ['semestral', 'Cada 6 meses', 182, 2], ['anual', 'Cada año', 365, 1]];
+  function suscripciones() {
+    const hoy = hoyISO(), desde = isoDe(new Date(parseISO(hoy) - 400 * 864e5));
+    const grupos = new Map();
+    S.movimientos.forEach((x) => {
+      if (x.tipo !== 'gasto' || x.fecha < desde || x.fecha > hoy || x.categoriaId === CAT_PREST) return;
+      const n = (x.nota || '').trim(); if (!n) return;
+      const k = slug(n).replace(/\d{3,}/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '') || slug(n);
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push(x);
+    });
+    const out = [];
+    grupos.forEach((lst) => {
+      lst.sort((a, b) => a.fecha.localeCompare(b.fecha));
+      const fechas = [...new Set(lst.map((x) => x.fecha))];
+      if (fechas.length < 2) return;
+      const gaps = []; for (let i = 1; i < fechas.length; i++) gaps.push((parseISO(fechas[i]) - parseISO(fechas[i - 1])) / 864e5);
+      const med = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+      const f = FREC_SUS.find((q) => Math.abs(med - q[2]) <= Math.max(3, q[2] * 0.15));
+      if (!f) return;
+      if (f[0] !== 'anual' && f[0] !== 'semestral' && fechas.length < 3 && f[0] !== 'mensual') return;
+      const montos = lst.map((x) => x.monto), mn = Math.min(...montos), mx = Math.max(...montos);
+      if (mx > mn * 1.35 + 1) return; // cambia mucho de precio: no es suscripción
+      const ult = lst[lst.length - 1];
+      const dias = (parseISO(hoy) - parseISO(ult.fecha)) / 864e5;
+      if (dias > f[2] * 1.6 + 5) return; // ya no se cobra
+      const prox = isoDe(new Date(parseISO(ult.fecha).getTime() + Math.round(f[2]) * 864e5));
+      out.push({ nombre: ult.nota.trim(), x: ult, ids: lst.map((x) => x.id), frec: f[1], monto: ult.monto, alMes: ult.monto * f[3] / 12, alAnio: ult.monto * f[3], veces: lst.length, ult: ult.fecha, prox, fijo: false });
+    });
+    // Los gastos programados también son cargos fijos
+    S.recurrentes.forEach((r) => {
+      if (r.tipo !== 'gasto' || r.categoriaId === CAT_PREST || (r.fin && r.fin < hoy)) return;
+      if (out.some((o) => slug(o.nombre) === slug(r.nota || ''))) return;
+      const fr = FRECS[r.frecuencia]; if (!fr) return;
+      const porAnio = fr[1] === 'd' ? 365 / fr[2] : 12 / fr[2];
+      const prox = proximas(r, isoDe(new Date(parseISO(hoy).getTime() + 400 * 864e5)), 1)[0] || '';
+      out.push({ nombre: r.nota || (cat(r.categoriaId) || {}).nombre || 'Gasto programado', x: { categoriaId: r.categoriaId, cuentaId: r.cuentaId }, ids: S.movimientos.filter((m) => m.recurrenteId === r.id).map((m) => m.id), frec: fr[0], monto: r.monto, alMes: r.monto * porAnio / 12, alAnio: r.monto * porAnio, veces: 0, ult: '', prox, fijo: true, recId: r.id });
+    });
+    return out.sort((a, b) => b.alMes - a.alMes);
+  }
+  function sheetSuscripciones() {
+    const lst = suscripciones(), alMes = suma(lst.map((o) => o.alMes)), alAnio = suma(lst.map((o) => o.alAnio));
+    const filas = lst.map((o, i) => { const c = cat(o.x.categoriaId); return `<button class="row" type="button" data-act="sus-ver" data-i="${i}">${icCat(c)}<span class="rt"><span class="t1">${esc(o.nombre)}</span><span class="t2" style="white-space:normal">${esc(o.frec)} · ${money(o.monto)}${o.prox ? (o.prox < hoyISO() ? ' · tocaba ~' : ' · próximo ~') + (o.prox.slice(0, 4) !== hoyISO().slice(0, 4) ? fechaTxt(parseISO(o.prox), { month: 'short', day: 'numeric', year: 'numeric' }) : fCorta(o.prox)) : ''}${o.fijo ? ' · programado' : ''}</span><span class="t2">${money(o.alAnio)} al año</span></span><span class="amt">${money(o.alMes)}<small>al mes</small></span></button>`; });
+    abrirSheet(`${cabeza('Suscripciones y cargos fijos', false)}<div style="display:grid; gap:14px">
+      <dl class="kv"><div><dt>Al mes</dt><dd>${money(alMes)}</dd></div><div><dt>Al año</dt><dd>${money(alAnio)}</dd></div><div><dt>Cargos</dt><dd>${lst.length}</dd></div></dl>
+      ${lst.length ? `<div class="group">${filas.join('')}</div>` : '<div class="empty"><strong>Todavía no encuentro cargos que se repitan</strong>Aparecen aquí cuando un gasto con la misma descripción y casi la misma cantidad se cobra cada semana, cada mes o cada año, o cuando programas un gasto.</div>'}
+      <p class="note" style="margin:0">La app los encuentra sola: gastos con la misma descripción y casi la misma cantidad que se repiten cada semana, mes o año. "Al mes" convierte cada cargo a lo que cuesta por mes. Toca uno para ver sus cobros.</p></div>`);
+    sheetSuscripciones.lista = lst;
+  }
+  function sheetSusVer(i) {
+    const o = (sheetSuscripciones.lista || [])[i]; if (!o) return;
+    if (o.fijo && !o.ids.length) { sheetRec(o.recId); return; }
+    const movs = S.movimientos.filter((m) => o.ids.includes(m.id)).sort(ordenMov);
+    abrirSheet(`<div class="sheet-head"><button class="link" type="button" data-act="sus-volver">‹ Atrás</button><h2>${esc(o.nombre)}</h2><span></span></div><div style="display:grid; gap:14px"><dl class="kv"><div><dt>${esc(o.frec)}</dt><dd>${money(o.monto)}</dd></div><div><dt>Al año</dt><dd>${money(o.alAnio)}</dd></div><div><dt>Cobros</dt><dd>${movs.length}</dd></div></dl><div class="group">${movs.map((x) => filaMov(x)).join('')}</div>${o.fijo ? `<button class="btn block tinted" type="button" data-act="editar-rec" data-id="${o.recId}">Editar gasto programado</button>` : ''}</div>`);
   }
   function sheetDesglose(k, data) {
     const ym = data && data.ym ? data.ym : ymHoy(), d = disponible(ymHoy()), sal = saldos(), pat = patrimonio(sal);
@@ -1481,7 +1552,7 @@
         const c = cat(id);
         titulo = c ? c.nombre : 'Sin categoría'; total = money(st.porCat[id] || 0);
         if (id === '_g') nota = 'Toca cada movimiento, elige su categoría y guarda. También puedes buscarlos en Movimientos con el filtro «Sin categoría».';
-        cuerpo = grupoD(nombreMes(ym), movsMes(ym, (x) => x.tipo !== 'transferencia' && x.tipo !== 'ingreso' && (id === '_g' ? !x.categoriaId : x.categoriaId === id)).map((x) => filaMov(x)));
+        cuerpo = grupoD(nombreMes(ym), movsMes(ym, (x) => x.tipo !== 'transferencia' && x.tipo !== 'ingreso' && tieneCat(x, id)).map((x) => filaMov(x, { parteDe: id })));
       }
     } else if (k === 'mes') {
       const st = statsMes(ym);
@@ -1586,7 +1657,7 @@
   }
   function renderMovLista() {
     const q = filtro.q.trim().toLowerCase();
-    const lista = S.movimientos.filter((x) => x.fecha.slice(0, 7) === mesMov && (!filtro.cuenta || x.cuentaId === filtro.cuenta || x.cuentaDestinoId === filtro.cuenta) && (!filtro.cat || (filtro.cat === '_sin' ? !x.categoriaId && x.tipo !== 'transferencia' : x.categoriaId === filtro.cat)) && (!filtro.estado || (filtro.estado === 'post') === !!x.posteado) && (!q || (x.nota + ' ' + ((cat(x.categoriaId) || {}).nombre || '')).toLowerCase().includes(q))).sort(ordenMov);
+    const lista = S.movimientos.filter((x) => x.fecha.slice(0, 7) === mesMov && (!filtro.cuenta || x.cuentaId === filtro.cuenta || x.cuentaDestinoId === filtro.cuenta) && (!filtro.cat || (x.tipo !== 'transferencia' && tieneCat(x, filtro.cat))) && (!filtro.estado || (filtro.estado === 'post') === !!x.posteado) && (!q || (x.nota + ' ' + ((cat(x.categoriaId) || {}).nombre || '')).toLowerCase().includes(q))).sort(ordenMov);
     const el = $('#mov-lista'); if (!el) return;
     if (!lista.length) {
       const hay = filtro.cuenta || filtro.cat || filtro.estado || q;
@@ -1668,6 +1739,7 @@
     });
     if (st.porCat._g) html += `<button type="button" class="warn-box tap" data-act="desglose" data-k="cat" data-id="_g" data-ym="${ym}" style="display:block; width:100%; text-align:left; border:0; font:inherit">Tienes ${money(st.porCat._g)} en gastos sin categoría este mes. <b>Toca para verlos y asignarles una ›</b></button>`;
 
+    { const sus = suscripciones(); if (sus.length) { const am = suma(sus.map((o) => o.alMes)), aa = suma(sus.map((o) => o.alAnio)); html += `<section class="section"><div class="sh"><h2>Suscripciones y cargos fijos</h2></div><div class="group"><button class="row" type="button" data-act="suscripciones"><span class="ic ic-color">${ICAT.recibo}</span><span class="rt"><span class="t1">${sus.length} ${sus.length === 1 ? 'cargo que se repite' : 'cargos que se repiten'}</span><span class="t2">${money(am)} al mes · ${money(aa)} al año</span></span><span class="chev">${IC.der}</span></button></div></section>`; } }
     const metas = S.metas;
     html += `<section class="section"><div class="sh"><h2>Metas de ahorro</h2><button class="link sm" type="button" data-act="nueva-meta">Nueva meta</button></div>${metas.length ? `<div class="metas">${metas.map(tarjetaMeta).join('')}</div><p class="note">${pa.manual ? `Separas ${money(pa.plan)} al mes para ahorro. Tus metas piden ${money(pa.metas)} al mes.` : `Tu ahorro mensual se calcula con lo que piden tus metas: ${money(pa.metas)}.`}</p>` : `<div class="empty"><strong>¿Para qué estás ahorrando?</strong>Un fondo de emergencia, un enganche, unas vacaciones. Pon la cantidad y la fecha, y te digo cuánto ahorrar al mes.<button class="btn small" type="button" data-act="nueva-meta">Crear meta</button></div>`}</section>`;
 
@@ -1914,6 +1986,8 @@
         <div class="frow"><label for="m-post" style="width:auto; flex:1">Ya aparece en el banco</label><input id="m-post" class="switch" type="checkbox" ${x && x.posteado ? 'checked' : ''}></div>
         ${x ? '' : `<div class="frow"><label for="m-rep">Repetir</label><select id="m-rep"><option value="">Nunca</option>${Object.entries(FRECS).map(([k, [n]]) => `<option value="${k}">${n}</option>`).join('')}</select></div>`}
       </div>
+      <div id="div-box" hidden style="display:grid; gap:8px; margin-top:-6px"><p class="note" style="margin:0 4px">Divide la cantidad en varias categorías. La primera se queda con lo que reste.</p><div class="group" id="div-lista"></div><p class="note" id="div-rest" style="margin:0 4px"></p></div>
+      <button class="link sm" type="button" id="m-div" style="justify-self:start; margin-top:-8px">Dividir en varias categorías</button>
       ${x && x.recurrenteId && S.recurrentes.some((r) => r.id === x.recurrenteId) ? `<button class="btn block tinted" type="button" data-act="editar-rec" data-id="${x.recurrenteId}">Parte de un movimiento programado · Editar</button>` : ''}
       <p class="note" id="m-hint" style="margin-top:-8px"></p>
       <p class="form-error" id="m-error" role="alert"></p>
@@ -1922,7 +1996,7 @@
     const pintar = (forzar) => {
       b.querySelectorAll('.seg button').forEach((bt) => bt.classList.toggle('on', bt.dataset.tipo === tipo));
       $('#row-dest', b).hidden = tipo !== 'transferencia';
-      $('#row-cat', b).hidden = tipo === 'transferencia';
+      $('#row-cat', b).hidden = tipo === 'transferencia' || !$('#div-box', b).hidden;
       $('#m-nota', b).placeholder = tipo === 'ingreso' ? '¿De dónde viene este dinero?' : tipo === 'transferencia' ? 'Opcional: para qué es' : tipo === 'devolucion' ? '¿Qué te regresaron?' : '¿En qué lo gastaste?';
       $('#l-cuenta', b).textContent = tipo === 'transferencia' ? 'Desde' : tipo === 'ingreso' ? 'A la cuenta' : tipo === 'devolucion' ? 'Regresa a' : 'Pagado con';
       const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto';
@@ -1934,8 +2008,45 @@
       $('#m-hint', b).textContent = tipo === 'devolucion' ? 'Para cuando te regresan dinero de una compra. Baja la deuda de la tarjeta (o regresa a tu cuenta) y se resta del gasto de la categoría; no cuenta como ingreso.' : tipo !== 'transferencia' ? '' : CM.length < 2 ? 'Para transferir necesitas al menos dos cuentas. Agrega otra en Cuentas.' : 'El dinero sale de una cuenta y entra a la otra, así que no cuenta como gasto ni como ingreso. Úsalo para pagar tu tarjeta o mover dinero a tu ahorro.';
     };
     pintar();
-    b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); }));
+    b.querySelectorAll('.seg button').forEach((bt) => bt.addEventListener('click', () => { tipo = bt.dataset.tipo; pintar(); pintarDiv(); }));
     conCatNueva(b, '#m-cat', () => tipo, pintar);
+    // ----- Dividir en varias categorías -----
+    let div = x && x.partes ? x.partes.map((p) => ({ ...p })) : null;
+    const opsCatDiv = (sel) => { const tc = tipo === 'ingreso' ? 'ingreso' : 'gasto'; return '<option value="">Sin categoría</option>' + S.categorias.filter((c) => c.tipo === tc && c.id !== CAT_PREST).map((c) => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join(''); };
+    const totalMov = () => { const v = parseMonto($('#m-monto', b).value); return v > 0 ? Math.round(v * 100) / 100 : 0; };
+    const leerDiv = () => { const filas = [...b.querySelectorAll('#div-lista .div-row')]; return filas.map((f, i) => ({ categoriaId: f.querySelector('.d-cat').value || null, monto: i === 0 ? null : (parseMonto(f.querySelector('.d-monto').value) || 0) })); };
+    const resto = () => { const ps = leerDiv(); return Math.round((totalMov() - ps.slice(1).reduce((a, p) => a + p.monto, 0)) * 100) / 100; };
+    const pintarResto = () => {
+      if (!div) return;
+      const r = resto(), f0 = b.querySelector('#div-lista .div-row .d-monto');
+      if (f0) f0.value = r > 0 ? fmtNum(r) : '';
+      $('#div-rest', b).innerHTML = r < -0.005 ? `<span class="neg">Las partes suman ${moneyAbs(-r)} más que el total.</span>` : `Total ${money(totalMov())}`;
+    };
+    const pintarDiv = () => {
+      const activo = !!div && tipo !== 'transferencia';
+      $('#div-box', b).hidden = !activo;
+      $('#m-div', b).hidden = tipo === 'transferencia';
+      $('#m-div', b).textContent = activo ? 'Usar una sola categoría' : 'Dividir en varias categorías';
+      $('#row-cat', b).hidden = tipo === 'transferencia' || activo;
+      if (!activo) return;
+      $('#div-lista', b).innerHTML = div.map((p, i) => `<div class="frow div-row"><select class="d-cat" aria-label="Categoría ${i + 1}" style="flex:1; min-width:0; text-align:left">${opsCatDiv(p.categoriaId)}</select><input class="money d-monto" type="text" inputmode="numeric" autocomplete="off" placeholder="$0.00" aria-label="Cantidad ${i + 1}" value="${i > 0 && p.monto ? fmtNum(p.monto) : ''}" ${i === 0 ? 'readonly tabindex="-1" style="max-width:110px; color:var(--label-2)"' : 'style="max-width:110px"'}>${i > 1 ? `<button type="button" class="link sm d-x" data-i="${i}" aria-label="Quitar">✕</button>` : '<span style="width:22px"></span>'}</div>`).join('') + `<button class="row add-row" type="button" id="d-mas"><span class="ic" style="color:var(--c-blue)">${IC.plus}</span><span class="rt"><span class="t1" style="color:var(--c-blue)">Agregar otra categoría</span></span></button>`;
+      pintarResto();
+    };
+    const guardarFilas = () => { const ps = leerDiv(); div = ps.map((p, i) => ({ categoriaId: p.categoriaId, monto: i === 0 ? 0 : p.monto })); };
+    $('#m-div', b).addEventListener('click', () => {
+      if (div) div = null;
+      else div = [{ categoriaId: $('#m-cat', b).value && $('#m-cat', b).value !== '__nueva' ? $('#m-cat', b).value : null, monto: 0 }, { categoriaId: null, monto: 0 }];
+      pintarDiv();
+      const seg = b.querySelectorAll('#div-lista .d-cat')[1]; if (seg) seg.focus();
+    });
+    $('#div-box', b).addEventListener('click', (e) => {
+      if (e.target.closest('#d-mas')) { guardarFilas(); div.push({ categoriaId: null, monto: 0 }); pintarDiv(); const ss = b.querySelectorAll('#div-lista .d-cat'); ss[ss.length - 1].focus(); return; }
+      const q = e.target.closest('.d-x'); if (q) { guardarFilas(); div.splice(+q.dataset.i, 1); pintarDiv(); }
+    });
+    $('#div-box', b).addEventListener('input', pintarResto);
+    $('#div-box', b).addEventListener('change', pintarResto);
+    $('#m-monto', b).addEventListener('input', pintarResto);
+    pintarDiv();
     // Autocompletar la descripción con lo que ya has escrito antes
     {
       const notaInp = $('#m-nota', b);
@@ -1990,8 +2101,22 @@
       if (!(monto > 0)) err = 'Escribe una cantidad mayor a 0.';
       else if (!fecha) err = 'Elige la fecha.';
       else if (tipo === 'transferencia' && cId === dId) err = 'Elige dos cuentas distintas para la transferencia.';
+      let partes = null;
+      if (!err && div && tipo !== 'transferencia') {
+        const ps = leerDiv(), r = resto();
+        if (r <= 0.005) err = 'Las partes suman lo mismo o más que el total. Baja alguna para que la primera categoría tenga algo.';
+        else {
+          partes = [{ categoriaId: ps[0].categoriaId, monto: r }, ...ps.slice(1).filter((p) => p.monto > 0.005).map((p) => ({ categoriaId: p.categoriaId, monto: Math.round(p.monto * 100) / 100 }))];
+          const unidas = []; partes.forEach((pt) => { const e0 = unidas.find((u) => u.categoriaId === pt.categoriaId); if (e0) e0.monto = Math.round((e0.monto + pt.monto) * 100) / 100; else unidas.push(pt); });
+          if (partes.length < 2) err = 'Escribe la cantidad de la segunda categoría, o toca «Usar una sola categoría».';
+          else if (unidas.length < 2) { $('#m-cat', b).value = unidas[0].categoriaId || ''; partes = null; }
+          else partes = unidas;
+        }
+      }
       if (err) { $('#m-error', b).textContent = err; return; }
-      const nuevo = { id: x ? x.id : nuevoId('m'), tipo, monto: Math.round(monto * 100) / 100, cuentaId: cId, cuentaDestinoId: tipo === 'transferencia' ? dId : null, categoriaId: tipo === 'transferencia' ? null : ($('#m-cat', b).value || null), fecha, nota: $('#m-nota', b).value.trim(), posteado: $('#m-post', b).checked, recurrenteId: x ? x.recurrenteId || null : null, creado: x ? x.creado : new Date().toISOString() };
+      const nuevo = { id: x ? x.id : nuevoId('m'), tipo, monto: Math.round(monto * 100) / 100, cuentaId: cId, cuentaDestinoId: tipo === 'transferencia' ? dId : null, categoriaId: tipo === 'transferencia' ? null : ($('#m-cat', b).value || null), fecha, nota: $('#m-nota', b).value.trim(), posteado: $('#m-post', b).checked, recurrenteId: x ? x.recurrenteId || null : null, creado: x ? x.creado : new Date().toISOString(), partes };
+      if (partes) nuevo.categoriaId = partes[0].categoriaId;
+      else if (div && tipo !== 'transferencia') nuevo.categoriaId = $('#m-cat', b).value || null;
       const rep = !x && $('#m-rep', b) ? $('#m-rep', b).value : '';
       if (rep) { const r = { id: nuevoId('r'), tipo, monto: nuevo.monto, cuentaId: cId, cuentaDestinoId: nuevo.cuentaDestinoId, categoriaId: nuevo.categoriaId, nota: nuevo.nota, frecuencia: rep, inicio: fecha, fin: '', hasta: fecha, modo: 'auto' }; S.recurrentes.push(r); nuevo.recurrenteId = r.id; }
       if (x) S.movimientos[S.movimientos.indexOf(x)] = nuevo; else S.movimientos.push(nuevo);
@@ -2226,10 +2351,10 @@
       guardar(); cerrarSheet(); toast(c ? 'Categoría actualizada' : 'Categoría creada'); render();
     });
     if (c && !sis) $('#k-borrar', b).addEventListener('click', async () => {
-      const n = S.movimientos.filter((m) => m.categoriaId === c.id).length;
+      const n = S.movimientos.filter((m) => m.tipo !== 'transferencia' && tieneCat(m, c.id)).length;
       if (!(await confirmar('¿Eliminar categoría?', n ? `Sus ${n} movimientos se quedan, pero sin categoría.` : 'No tiene movimientos.'))) return;
       S.categorias = S.categorias.filter((x) => x.id !== c.id);
-      S.movimientos.forEach((m) => { if (m.categoriaId === c.id) m.categoriaId = null; });
+      S.movimientos.forEach((m) => { if (m.partes) m.partes.forEach((p) => { if (p.categoriaId === c.id) p.categoriaId = null; }); if (m.categoriaId === c.id) m.categoriaId = m.partes ? m.partes[0].categoriaId : null; });
       S.recurrentes.forEach((r) => { if (r.categoriaId === c.id) r.categoriaId = null; });
       if (filtro.cat === c.id) filtro.cat = '';
       guardar(); cerrarSheet(); toast('Categoría eliminada'); render();
@@ -2320,6 +2445,7 @@
   function descReporte(x, cid) {
     if (x.nota) return x.nota;
     if (x.tipo === 'transferencia') { const otra = x.cuentaId === cid ? cuenta(x.cuentaDestinoId) : cuenta(x.cuentaId); return (x.cuentaId === cid ? 'Transferencia a ' : 'Transferencia de ') + (otra ? otra.nombre : '—'); }
+    if (x.partes) return 'Dividido: ' + nombrePartes(x);
     const c = cat(x.categoriaId); return c ? c.nombre : TIPO_MOV_R[x.tipo];
   }
   function reporteDatos(tipo, per) {
@@ -2331,8 +2457,8 @@
     S.movimientos.forEach((x) => {
       if (x.fecha < ini || x.fecha > fin || x.tipo === 'transferencia') return;
       if (x.tipo === 'ingreso') { ing += x.monto; return; }
-      const signo = x.tipo === 'devolucion' ? -1 : 1, k = x.categoriaId || '_g';
-      gas += signo * x.monto; porCat[k] = (porCat[k] || 0) + signo * x.monto;
+      const signo = x.tipo === 'devolucion' ? -1 : 1;
+      gas += signo * x.monto; partesDe(x).forEach((p) => { const k = p.categoriaId || '_g'; porCat[k] = (porCat[k] || 0) + signo * p.monto; });
     });
     const cuentas = S.cuentas.map((c) => {
       if (c.tipo === 'retiro') {
@@ -2343,7 +2469,7 @@
       }
       const apertura = saldoAl(c, antes);
       const lista = S.movimientos.filter((x) => (x.cuentaId === c.id || x.cuentaDestinoId === c.id) && x.fecha >= ini && x.fecha <= fin).sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.creado || '').localeCompare(b.creado || ''));
-      let run = apertura; const movs = lista.map((x) => { const e = efecto(x, c.id); run += e; const ca = cat(x.categoriaId); return { fecha: x.fecha, desc: descReporte(x, c.id), cat: x.tipo === 'transferencia' ? 'Transferencia' : (ca ? ca.nombre : ''), monto: e, saldo: run }; });
+      let run = apertura; const movs = lista.map((x) => { const e = efecto(x, c.id); run += e; const ca = cat(x.categoriaId); return { fecha: x.fecha, desc: descReporte(x, c.id), cat: x.tipo === 'transferencia' ? 'Transferencia' : x.partes ? 'Dividido: ' + nombrePartes(x) : (ca ? ca.nombre : ''), monto: e, saldo: run }; });
       return { c, apertura, cierre: run, movs };
     });
     return { tipo, per, ini, fin, titulo, ing, gas, porCat, patIni: patrimonioEn(antes), patFin: patrimonioEn(fin), cuentas };
@@ -2544,6 +2670,65 @@
     $('#d-seg', b).addEventListener('click', (e) => { const t = e.target.closest('[data-e]'); if (!t) return; deudaEst = t.dataset.e; [...$('#d-seg', b).children].forEach((x) => x.classList.toggle('on', x.dataset.e === deudaEst)); pintarDeudas(); });
     pintarDeudas();
   }
+  // ----- Recordatorios de pagos -----
+  // Próximos pagos: tarjetas (día de pago) y gastos o transferencias programados
+  function eventosPago(diasAdelante = 120) {
+    const hoy = hoyISO(), lim = isoDe(new Date(parseISO(hoy).getTime() + diasAdelante * 864e5)), ev = [];
+    S.cuentas.forEach((c) => {
+      if (c.tipo !== 'tarjeta' || !c.diaPago) return;
+      const e = estadoTarjeta(c), auto = !!(c.autopago && c.autopago.cuentaId);
+      let f = e && e.venc >= hoy ? e.venc : diaDespues(c.diaPago, isoDe(new Date(parseISO(hoy) - 864e5)));
+      for (let k = 0; k < 8 && f <= lim; k++) {
+        const primero = k === 0 && e && e.porPagar > 0.005 && f === e.venc;
+        ev.push({ id: 'mf-t-' + c.id + '-' + f, fecha: f, titulo: auto ? `Pago automático de ${c.nombre}` : `Pagar ${c.nombre}`, cuerpo: (primero ? `Por pagar ${money(e.porPagar)} · ` : '') + 'vence el ' + fCorta(f) + (auto ? ' · revisa que tengas saldo' : ''), tarjeta: c, auto });
+        f = diaDespues(c.diaPago, f);
+      }
+    });
+    S.recurrentes.forEach((r) => {
+      if (r.tipo === 'ingreso') return;
+      const c = cat(r.categoriaId), de = cuenta(r.cuentaDestinoId);
+      const titulo = r.nota || (r.tipo === 'transferencia' && de ? 'Pago a ' + de.nombre : c ? c.nombre : 'Pago programado');
+      proximas(r, lim, 30).forEach((f) => { if (f >= hoy) ev.push({ id: 'mf-r-' + r.id + '-' + f, fecha: f, titulo, cuerpo: money(r.monto) + ' · ' + fCorta(f), rec: r }); });
+    });
+    return ev.sort((a, b) => a.fecha.localeCompare(b.fecha));
+  }
+  const cfgAvisos = () => { const c = lsGet('avisos_pago') || {}; return { on: !!c.on, dias: [0, 1, 2, 3, 5].includes(c.dias) ? c.dias : 2 }; };
+  let tAvisos = null;
+  function programarAvisos(inmediato) {
+    if (!nativo || sesion.bloqueada) return;
+    clearTimeout(tAvisos);
+    tAvisos = setTimeout(async () => {
+      const cf = cfgAvisos(), ahora = new Date();
+      const lista = !cf.on ? [] : eventosPago(120).map((e) => {
+        const d = parseISO(e.fecha); d.setDate(d.getDate() - cf.dias); d.setHours(9, 0, 0, 0);
+        return { id: e.id, titulo: e.titulo, cuerpo: (cf.dias === 0 ? 'Hoy · ' : cf.dias === 1 ? 'Mañana · ' : `En ${cf.dias} días · `) + e.cuerpo, cuando: isoDe(d) + 'T09:00', t: d };
+      }).filter((e) => e.t > ahora).slice(0, 60).map(({ t, ...e }) => e);
+      try { const ok = await nativoGuardar('recordatorios', 'recordatorios.json', JSON.stringify(lista), 'application/json'); if (cf.on && !ok && inmediato) toast('Activa las notificaciones de Mis Finanzas en Configuración del iPhone.'); } catch (e) {}
+    }, inmediato ? 50 : 4000);
+  }
+  function icsPagos(dias) {
+    const hoy = hoyISO(), d8 = (iso) => iso.replace(/-/g, ''), escI = (t) => String(t).replace(/\\/g, '\\\\').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n');
+    const sello = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+    const alarma = (txt) => ['BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + escI(txt), 'TRIGGER:' + (dias === 0 ? '' : '-') + 'PT' + Math.abs(dias * 24 - 9) + 'H', 'END:VALARM'];
+    const ev = [], vistos = new Set();
+    eventosPago(400).forEach((e) => {
+      const clave = e.tarjeta ? 't' + e.tarjeta.id : 'r' + e.rec.id;
+      if (vistos.has(clave)) return; vistos.add(clave);
+      let rrule;
+      if (e.tarjeta) rrule = 'FREQ=MONTHLY;BYMONTHDAY=' + Math.min(e.tarjeta.diaPago, 31);
+      else { const m = { semanal: 'FREQ=WEEKLY', quincenal: 'FREQ=WEEKLY;INTERVAL=2', mensual: 'FREQ=MONTHLY', bimestral: 'FREQ=MONTHLY;INTERVAL=2', trimestral: 'FREQ=MONTHLY;INTERVAL=3', semestral: 'FREQ=MONTHLY;INTERVAL=6', anual: 'FREQ=YEARLY' }[e.rec.frecuencia]; if (!m) return; rrule = m + (e.rec.fin ? ';UNTIL=' + d8(e.rec.fin) : ''); }
+      const titulo = e.tarjeta ? e.titulo : e.titulo + ' · ' + money(e.rec.monto);
+      const sig = isoDe(new Date(parseISO(e.fecha).getTime() + 864e5));
+      ev.push('BEGIN:VEVENT', 'UID:' + clave + '@mis-finanzas', 'DTSTAMP:' + sello, 'DTSTART;VALUE=DATE:' + d8(e.fecha), 'DTEND;VALUE=DATE:' + d8(sig), 'RRULE:' + rrule, 'SUMMARY:' + escI(titulo), 'DESCRIPTION:' + escI('Recordatorio de Mis Finanzas'), 'TRANSP:TRANSPARENT', ...alarma(titulo), 'END:VEVENT');
+    });
+    if (!ev.length) return null;
+    return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Mis Finanzas//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Pagos · Mis Finanzas', ...ev, 'END:VCALENDAR'].join('\r\n') + '\r\n';
+  }
+  async function calendarioPagos() {
+    const cf = cfgAvisos(), txt = icsPagos(cf.dias);
+    if (!txt) { toast('No tienes tarjetas con día de pago ni pagos programados.'); return; }
+    await bajarArchivo('pagos-mis-finanzas.ics', txt, 'text/calendar');
+  }
   function sheetAjustes() {
     const c = textoCopia(), lk = lockCfg();
     const b = abrirSheet(`${cabeza('Ajustes y copia', false)}<div style="display:grid; gap:18px">
@@ -2555,6 +2740,11 @@
         <div class="frow"><label for="z-rec">Recordarme</label><select id="z-rec">${[[1, 'Cada día'], [7, 'Cada semana'], [14, 'Cada 2 semanas'], [30, 'Cada mes'], [0, 'Nunca']].map(([v, n]) => `<option value="${v}" ${S.config.recordatorioDias === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
         <button class="row plain" type="button" id="z-snaps"><span class="rt"><span class="t1">Copias en este dispositivo</span><span class="t2">Una por cada día que abres la app · últimas ${MAX_SNAPS}</span></span><span class="amt" style="color:var(--tint)">Ver</span></button>
       </div><p class="note">${nativo ? 'Además, cada vez que haces un cambio la app guarda sola una copia en <b>Archivos › En mi iPhone › Mis Finanzas</b> («Copia automática.json»). Esa copia vive en tu iPhone; para no perder nada si cambias o pierdes el teléfono, guarda también tu copia en iCloud Drive cuando la app te avise.' : 'Apple no deja que una página web guarde archivos sola en iCloud, así que la app te avisa en Resumen cuando toca guardar tu copia y lo haces con un toque.'}</p></div>
+      <div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Recordatorios de pagos</p><div class="group">
+        ${nativo ? `<div class="frow"><label for="z-av" class="lbl-w">Avisarme antes de cada pago</label><input id="z-av" class="switch" type="checkbox" ${cfgAvisos().on ? 'checked' : ''}></div>` : ''}
+        <div class="frow"><label for="z-avd">Cuándo</label><select id="z-avd">${[[0, 'El mismo día'], [1, '1 día antes'], [2, '2 días antes'], [3, '3 días antes'], [5, '5 días antes']].map(([v, n]) => `<option value="${v}" ${cfgAvisos().dias === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        <button class="row plain" type="button" id="z-cal"><span class="rt"><span class="t1" style="color:var(--tint)">Agregar mis pagos al Calendario</span><span class="t2">${(() => { const n = new Set(eventosPago(400).map((e) => (e.tarjeta ? 't' + e.tarjeta.id : 'r' + e.rec.id))).size; return n ? n + (n === 1 ? ' pago que se repite' : ' pagos que se repiten') : 'Todavía no tienes pagos con fecha'; })()}</span></span></button>
+      </div><p class="note">${nativo ? 'Te llega una notificación a las 9 de la mañana antes de que venza cada tarjeta y cada pago programado. ' : ''}«Agregar al Calendario» descarga un archivo con tus tarjetas y pagos programados que se repiten cada mes, con su alarma; ábrelo y toca «Agregar todo». Si cambias tus pagos, bórralos del Calendario y vuelve a agregarlos.</p></div>
       ${cifradoOk ? `<div style="display:grid; gap:8px"><p class="eyebrow" style="padding:0 16px">Seguridad</p><div class="group">
         <div class="frow"><label for="z-lock" class="lbl-w">Bloquear con código</label><input id="z-lock" class="switch" type="checkbox" ${lk ? 'checked' : ''}></div>
         ${lk && bioOk ? `<div class="frow"><label for="z-bio" class="lbl-w">Usar Face ID o Touch ID</label><input id="z-bio" class="switch" type="checkbox" ${lk.bio ? 'checked' : ''}></div>` : ''}
@@ -2566,6 +2756,9 @@
     </div>`);
     $('#z-rec', b).addEventListener('change', (e) => { S.config.recordatorioDias = +e.target.value; guardar(); lsDel('copia_pospuesta'); toast('Recordatorio actualizado'); });
     $('#z-snaps', b).addEventListener('click', () => sheetSnaps());
+    const av = $('#z-av', b); if (av) av.addEventListener('change', (e) => { lsSet('avisos_pago', { ...cfgAvisos(), on: e.target.checked }); programarAvisos(true); toast(e.target.checked ? 'Recordatorios activados' : 'Recordatorios desactivados'); });
+    $('#z-avd', b).addEventListener('change', (e) => { lsSet('avisos_pago', { ...cfgAvisos(), dias: +e.target.value }); programarAvisos(true); });
+    $('#z-cal', b).addEventListener('click', () => calendarioPagos());
     if (!cifradoOk) return b;
     $('#z-lock', b).addEventListener('change', (e) => { e.target.checked = !!lk; sheetPin(lk ? 'quitar' : 'crear'); });
     const bio = $('#z-bio', b);
@@ -2824,6 +3017,9 @@
     'mes-mov': (t) => { mesMov = addMes(mesMov, +t.dataset.d); render(); },
     'mes-pres': (t) => { mesPres = addMes(mesPres, +t.dataset.d); render(); },
     'limpiar-filtros': () => { filtro.cuenta = ''; filtro.cat = ''; filtro.q = ''; filtro.estado = ''; render(); },
+    'suscripciones': () => sheetSuscripciones(),
+    'sus-ver': (t) => sheetSusVer(+t.dataset.i),
+    'sus-volver': () => sheetSuscripciones(),
     'desglose': (t) => sheetDesglose(t.dataset.k, { ym: t.dataset.ym, g: t.dataset.g, id: t.dataset.id }),
     'ir-prest': (t) => { cerrarSheet(); ir('prestamos'); prestAbierto = t.dataset.id; render(); window.scrollTo(0, 0); },
     'ver-mov-cuenta': (t) => abrirCuenta(t.dataset.id),
@@ -2953,7 +3149,7 @@
     let estadoIni;
     try { estadoIni = await cargar(); } catch (e) { S = normalizarEstado(lsGet('finanzas_v1') || {}); }
     if (cifradoOk) await revisarBio();
-    if (estadoIni === 'bloqueada') mostrarLock(); else { procesarRecurrentes(); render(); snapDiario(); }
+    if (estadoIni === 'bloqueada') mostrarLock(); else { procesarRecurrentes(); render(); snapDiario(); setTimeout(() => programarAvisos(), 1500); }
     // Pide al sistema que no borre los datos de la app para liberar espacio
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   })();
